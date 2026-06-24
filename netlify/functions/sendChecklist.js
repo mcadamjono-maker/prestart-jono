@@ -28,6 +28,7 @@ exports.handler = async function (event, context) {
 
     const {
       operator,
+      template,
       machine,
       hours,
       wofExpiry,
@@ -45,9 +46,15 @@ exports.handler = async function (event, context) {
     const recipient = process.env.RECIPIENT_EMAIL || process.env.SENDER_EMAIL || "recipient@example.com";
     const sender = process.env.SENDER_EMAIL || "no-reply@example.com";
 
-    const answersText = typeof answers === "string" ? answers : JSON.stringify(answers, null, 2);
+    const answersText = Array.isArray(answers)
+      ? answers
+          .map((answer) => `${answer.section} - ${answer.item}: ${answer.result}`)
+          .join("\n")
+      : typeof answers === "string"
+        ? answers
+        : JSON.stringify(answers, null, 2);
 
-    const text = `Operator: ${operator}\nMachine: ${machine}\nHours: ${hours}\nWOF/COF: ${wofExpiry}\nRego: ${regoExpiry}\nRUC: ${rucExpiry}\n\nNotes:\n${notes}\n\nAnswers:\n${answersText}`;
+    const text = `Template: ${template || "Unknown"}\nOperator: ${operator}\nMachine: ${machine}\nHours: ${hours}\nWOF/COF: ${wofExpiry}\nRego: ${regoExpiry}\nRUC: ${rucExpiry}\n\nNotes:\n${notes}\n\nAnswers:\n${answersText}`;
 
     const msg = {
       to: recipient,

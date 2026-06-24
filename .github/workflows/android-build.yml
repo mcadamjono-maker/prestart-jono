@@ -1,0 +1,107 @@
+name: WDL Field Forms Android Builds
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "docs/**"
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      buildType:
+        type: choice
+        description: "Build type to run"
+        default: prod-apk
+        options:
+          - dev
+          - prod-apk
+          - prod-aab
+          - all
+
+env:
+  EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+  NODE_OPTIONS: --max_old_space_size=4096
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Expo dependencies
+        run: npx expo install --check
+
+      - name: Export web smoke test
+        run: npx expo export --platform web --output-dir dist-ci
+
+  build-android:
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify EAS CLI
+        run: npx eas-cli@latest --version
+
+      - name: Build development APK
+        if: github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'dev'
+        run: npx eas-cli@latest build --platform android --profile dev --local --non-interactive --output ./WDL-Field-Forms-dev.apk
+        env:
+          NODE_ENV: development
+
+      - name: Build production APK
+        if: github.event_name == 'push' || github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'prod-apk'
+        run: npx eas-cli@latest build --platform android --profile production-apk --local --non-interactive --output ./WDL-Field-Forms.apk
+        env:
+          NODE_ENV: production
+
+      - name: Build production AAB
+        if: github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'prod-aab'
+        run: npx eas-cli@latest build --platform android --profile production --local --non-interactive --output ./WDL-Field-Forms.aab
+        env:
+          NODE_ENV: production
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wdl-field-forms-android
+          path: |
+            ./WDL-Field-Forms-dev.apk
+            ./WDL-Field-Forms.apk
+            ./WDL-Field-Forms.aab
+          if-no-files-found: error
+          retention-days: 7

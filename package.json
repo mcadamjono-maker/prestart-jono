@@ -1,23 +1,33 @@
 {
-  "name": "williams-drainage-prestart",
+  "name": "wdl-field-forms",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "email-server": "node scripts/local-email-server.js",
+    "preview-web": "node scripts/static-preview-server.js",
     "web": "expo start --web"
   },
   "dependencies": {
-    "@emailjs/browser": "^4.4.1",
-    "@sendgrid/mail": "^7.8.0",
-    "expo": "~55.0.24",
-    "expo-file-system": "~15.2.2",
+    "@emailjs/react-native": "^5.1.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@sendgrid/mail": "^8.1.6",
+    "expo": "~55.0.26",
+    "expo-image-manipulator": "~55.0.17",
     "expo-image-picker": "~55.0.20",
+    "expo-mail-composer": "~55.0.14",
     "expo-status-bar": "~55.0.6",
     "react": "19.2.0",
+    "react-dom": "19.2.0",
     "react-native": "0.83.6",
-    "react-native-safe-area-context": "~5.6.2"
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-svg": "15.15.3",
+    "react-native-web": "^0.21.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "eas-cli": "^20.1.0"
+  }
 }

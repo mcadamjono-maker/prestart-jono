@@ -1,22 +1,32 @@
 {
   "expo": {
-    "name": "williams-drainage-prestart",
+    "name": "WDL Field Forms",
     "slug": "williams-drainage-prestart",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "wdlfieldforms",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash-logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
+    "plugins": [
+      "expo-mail-composer"
+    ],
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.williamsdrainage.fieldforms",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.williamsdrainage.fieldforms",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -24,6 +34,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "94e6f5e5-d9f5-4fdc-a7fe-85601ba563c7"
+      }
+    },
+    "owner": "jono555"
   }
 }
