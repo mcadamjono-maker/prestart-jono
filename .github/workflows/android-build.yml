@@ -1,5 +1,7 @@
 name: WDL Field Forms Android Builds
 
+# Builds installable Android files using GitHub-hosted runners, avoiding Expo cloud build quota.
+
 on:
   push:
     branches: [main, master]
