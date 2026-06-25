@@ -2,7 +2,7 @@ const { onRequest } = require("firebase-functions/v2/https");
 
 const MAX_ATTACHMENTS = 8;
 const MAX_BASE64_ATTACHMENT_CHARS = 36 * 1024 * 1024;
-const DEFAULT_TO_EMAIL = "jonomcadam@hotmail.com";
+const DEFAULT_TO_EMAIL = "Jonomcadam@hotmail.com";
 const DEFAULT_FROM_EMAIL = "WDL Field Forms <no-reply@maileroo.com>";
 const DEFAULT_SMTP_HOST = "smtp.maileroo.com";
 const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];

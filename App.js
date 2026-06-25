@@ -165,8 +165,15 @@ const EMAILJS_PURCHASE_TEMPLATE_ID =
   process.env.EXPO_PUBLIC_EMAILJS_PURCHASE_TEMPLATE_ID || "";
 const EMAILJS_PUBLIC_KEY =
   process.env.EXPO_PUBLIC_EMAILJS_PUBLIC_KEY || "HUIGvg0whmV85-RLO";
-const DEFAULT_EMAIL_RECIPIENT = "jonomcadam@hotmail.com";
-const ALLOWED_RECIPIENT_EMAILS = [DEFAULT_EMAIL_RECIPIENT.toLowerCase()];
+const RECIPIENT_EMAIL_OPTIONS = [
+  "Jonomcadam@hotmail.com",
+  "Trish@williamsdrainage.co.nz",
+  "Brad@williamsdrainage.co.nz",
+];
+const DEFAULT_EMAIL_RECIPIENT = RECIPIENT_EMAIL_OPTIONS[0];
+const ALLOWED_RECIPIENT_EMAILS = RECIPIENT_EMAIL_OPTIONS.map((email) =>
+  email.toLowerCase()
+);
 const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
 const DEFAULT_FIREBASE_REPORT_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/sendReport";
@@ -474,12 +481,12 @@ const DraftTextInput = ({
 };
 
 const SettingsGearIcon = () => (
-  <Svg width={26} height={26} viewBox="0 0 24 24" pointerEvents="none">
+  <Svg width={19} height={19} viewBox="0 0 24 24" pointerEvents="none">
     <Path
       d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
       fill="none"
       stroke="#D7FF2F"
-      strokeWidth={1.8}
+      strokeWidth={1.55}
       strokeLinecap="round"
       strokeLinejoin="round"
     />
@@ -487,11 +494,11 @@ const SettingsGearIcon = () => (
       d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .92l-.03.08A2 2 0 0 1 12.12 21h-.24a2 2 0 0 1-1.85-1.6l-.03-.08a1.7 1.7 0 0 0-1-.92 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.92-1l-.08-.03A2 2 0 0 1 3 12.12v-.24a2 2 0 0 1 1.6-1.85l.08-.03a1.7 1.7 0 0 0 .92-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.92l.03-.08A2 2 0 0 1 11.88 3h.24a2 2 0 0 1 1.85 1.6l.03.08a1.7 1.7 0 0 0 1 .92 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.12.39.42.72.92 1l.08.03A2 2 0 0 1 21 11.88v.24a2 2 0 0 1-1.6 1.85l-.08.03a1.7 1.7 0 0 0-.92 1Z"
       fill="none"
       stroke="#D7FF2F"
-      strokeWidth={1.8}
+      strokeWidth={1.55}
       strokeLinecap="round"
       strokeLinejoin="round"
     />
-    <Circle cx={12} cy={12} r={1.15} fill="#D7FF2F" />
+    <Circle cx={12} cy={12} r={0.95} fill="#D7FF2F" />
   </Svg>
 );
 
@@ -670,6 +677,8 @@ export default function App() {
   const [recipientEmail, setRecipientEmail] = useState(DEFAULT_EMAIL_RECIPIENT);
   const [settingsRecipientEmail, setSettingsRecipientEmail] =
     useState(DEFAULT_EMAIL_RECIPIENT);
+  const [isSettingsEmailDropdownOpen, setIsSettingsEmailDropdownOpen] =
+    useState(false);
   const [settingsJobNumber, setSettingsJobNumber] = useState("");
   const [settingsJobName, setSettingsJobName] = useState("");
   const [isRefreshingJobs, setIsRefreshingJobs] = useState(false);
@@ -968,8 +977,8 @@ export default function App() {
     saveJobs();
   }, [hasLoadedJobs, jobOptions]);
 
-  const saveRecipientSetting = async () => {
-    const nextRecipientEmail = normalizeEmailAddress(settingsRecipientEmail);
+  const saveRecipientEmailSetting = async (email) => {
+    const nextRecipientEmail = normalizeEmailAddress(email);
 
     if (!isValidEmailAddress(nextRecipientEmail)) {
       Alert.alert("Check Email", "Please enter a valid receiving email address.");
@@ -1000,21 +1009,14 @@ export default function App() {
     }
   };
 
+  const selectRecipientEmail = (email) => {
+    setIsSettingsEmailDropdownOpen(false);
+    saveRecipientEmailSetting(email);
+  };
+
   const restoreDefaultRecipient = async () => {
-    try {
-      setRecipientEmail(DEFAULT_EMAIL_RECIPIENT);
-      setSettingsRecipientEmail(DEFAULT_EMAIL_RECIPIENT);
-      await AsyncStorage.setItem(
-        SETTINGS_STORAGE_KEY,
-        JSON.stringify({ recipientEmail: DEFAULT_EMAIL_RECIPIENT })
-      );
-      Alert.alert(
-        "Settings Saved",
-        `Reports will now send to ${DEFAULT_EMAIL_RECIPIENT}.`
-      );
-    } catch (error) {
-      Alert.alert("Settings Error", "Unable to restore the default email.");
-    }
+    setIsSettingsEmailDropdownOpen(false);
+    saveRecipientEmailSetting(DEFAULT_EMAIL_RECIPIENT);
   };
 
   const addSettingsJob = () => {
@@ -2275,29 +2277,65 @@ export default function App() {
                   Current receiving email: {activeRecipientEmail}
                 </Text>
 
-                <StableLabeledInput
-                  label="Receiving Email"
-                  value={settingsRecipientEmail}
-                  onChangeText={setSettingsRecipientEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  commitOnChange
-                  editable={!isSubmitting}
-                />
-
-                <View style={styles.settingsButtonStack}>
+                <View style={styles.labeledInput}>
+                  <Text style={styles.inputLabel}>Receiving Email</Text>
                   <Pressable
-                    style={styles.settingsPrimaryButton}
-                    onPress={saveRecipientSetting}
+                    style={[
+                      styles.settingsSelectButton,
+                      isSettingsEmailDropdownOpen &&
+                        styles.settingsSelectButtonOpen,
+                    ]}
+                    onPress={() =>
+                      setIsSettingsEmailDropdownOpen(
+                        (currentValue) => !currentValue
+                      )
+                    }
                     disabled={isSubmitting}
                     accessibilityRole="button"
                   >
-                    <Text style={styles.settingsPrimaryButtonText}>
-                      SAVE RECEIVING EMAIL
+                    <Text style={styles.settingsSelectText}>
+                      {settingsRecipientEmail}
+                    </Text>
+                    <Text style={styles.settingsSelectArrow}>
+                      {isSettingsEmailDropdownOpen ? "-" : "+"}
                     </Text>
                   </Pressable>
 
+                  {isSettingsEmailDropdownOpen && (
+                    <View style={styles.settingsDropdownList}>
+                      {RECIPIENT_EMAIL_OPTIONS.map((email) => {
+                        const isSelected =
+                          normalizeEmailAddress(settingsRecipientEmail).toLowerCase() ===
+                          email.toLowerCase();
+
+                        return (
+                          <Pressable
+                            key={email}
+                            style={[
+                              styles.settingsDropdownOption,
+                              isSelected &&
+                                styles.settingsDropdownOptionSelected,
+                            ]}
+                            onPress={() => selectRecipientEmail(email)}
+                            accessibilityRole="button"
+                          >
+                            <Text
+                              style={[
+                                styles.settingsDropdownOptionText,
+                                isSelected &&
+                                  styles.settingsDropdownOptionTextSelected,
+                              ]}
+                            >
+                              {email}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.settingsButtonStack}>
                   <Pressable
                     style={styles.secondaryButton}
                     onPress={restoreDefaultRecipient}
@@ -3419,16 +3457,17 @@ const styles = StyleSheet.create({
 
   settingsFloatingButton: {
     position: "absolute",
-    right: 18,
-    bottom: 24,
-    width: 54,
-    height: 54,
-    borderRadius: 18,
+    right: 14,
+    bottom: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.84)",
+    backgroundColor: "rgba(0,0,0,0.52)",
     borderWidth: 1,
-    borderColor: "rgba(215,255,47,0.52)",
+    borderColor: "rgba(215,255,47,0.22)",
+    opacity: 0.76,
   },
 
   backButton: {
@@ -3741,6 +3780,67 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 2,
     marginBottom: 14,
+  },
+
+  settingsSelectButton: {
+    backgroundColor: "#050505",
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: "#1f1f1f",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
+
+  settingsSelectButtonOpen: {
+    borderColor: "rgba(215,255,47,0.62)",
+  },
+
+  settingsSelectText: {
+    color: "#fff",
+    fontSize: 17,
+    flex: 1,
+  },
+
+  settingsSelectArrow: {
+    color: "#D7FF2F",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+
+  settingsDropdownList: {
+    backgroundColor: "#080808",
+    borderRadius: 18,
+    marginTop: -4,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.24)",
+    overflow: "hidden",
+  },
+
+  settingsDropdownOption: {
+    paddingHorizontal: 18,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+
+  settingsDropdownOptionSelected: {
+    backgroundColor: "#D7FF2F",
+  },
+
+  settingsDropdownOptionText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  settingsDropdownOptionTextSelected: {
+    color: "#000",
   },
 
   settingsPrimaryButton: {
