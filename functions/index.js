@@ -1,10 +1,10 @@
 const { onRequest } = require("firebase-functions/v2/https");
-const { Resend } = require("resend");
 
 const MAX_ATTACHMENTS = 8;
 const MAX_BASE64_ATTACHMENT_CHARS = 36 * 1024 * 1024;
 const DEFAULT_TO_EMAIL = "jonomcadam@hotmail.com";
-const DEFAULT_FROM_EMAIL = "WDL Field Forms <onboarding@resend.dev>";
+const DEFAULT_FROM_EMAIL = "WDL Field Forms <no-reply@maileroo.com>";
+const DEFAULT_SMTP_HOST = "smtp.maileroo.com";
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -71,10 +71,19 @@ const normaliseAttachments = (attachments = []) => {
     return {
       filename: normaliseFilename(attachment?.filename, index),
       content,
-      content_type: attachment?.contentType || "image/jpeg",
+      contentType: attachment?.contentType || "image/jpeg",
+      encoding: "base64",
     };
   });
 };
+
+const smtpHost = process.env.MAILEROO_SMTP_HOST || DEFAULT_SMTP_HOST;
+const smtpPort = Number(process.env.MAILEROO_SMTP_PORT || 587);
+const smtpUser = (process.env.MAILEROO_SMTP_USER || "").trim();
+const smtpPass = (process.env.MAILEROO_SMTP_PASS || "").trim();
+const smtpFrom = process.env.MAILEROO_FROM || DEFAULT_FROM_EMAIL;
+const smtpTo = process.env.MAILEROO_TO || DEFAULT_TO_EMAIL;
+const smtpReplyTo = process.env.MAILEROO_REPLY_TO || smtpTo;
 
 exports.sendReport = onRequest(
   {
@@ -82,7 +91,7 @@ exports.sendReport = onRequest(
     cors: true,
     memory: "512MiB",
     timeoutSeconds: 60,
-    secrets: ["RESEND_API_KEY"],
+    secrets: ["MAILEROO_SMTP_USER", "MAILEROO_SMTP_PASS"],
   },
   async (request, response) => {
     if (request.method === "OPTIONS") {
@@ -96,8 +105,10 @@ exports.sendReport = onRequest(
     }
 
     try {
-      if (!process.env.RESEND_API_KEY) {
-        response.status(500).json({ error: "RESEND_API_KEY is not configured." });
+      if (!smtpUser || !smtpPass) {
+        response.status(500).json({
+          error: "MAILEROO_SMTP_USER and MAILEROO_SMTP_PASS are not configured.",
+        });
         return;
       }
 
@@ -110,30 +121,42 @@ exports.sendReport = onRequest(
         return;
       }
 
-      const resend = new Resend(process.env.RESEND_API_KEY);
+      const nodemailer = require("nodemailer");
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
       const attachments = normaliseAttachments(request.body?.attachments);
-      const emailResult = await resend.emails.send({
-        from: process.env.EMAIL_FROM || DEFAULT_FROM_EMAIL,
-        to: [process.env.EMAIL_TO || DEFAULT_TO_EMAIL],
-        replyTo: process.env.REPLY_TO || process.env.EMAIL_TO || DEFAULT_TO_EMAIL,
+
+      const emailResult = await transporter.sendMail({
+        from: smtpFrom,
+        to: smtpTo,
+        replyTo: smtpReplyTo,
         subject,
         text: message,
         html: buildReportHtml({ reportType, subject, message }),
         attachments,
       });
 
-      if (emailResult.error) {
-        response.status(502).json({
-          error: emailResult.error.message || "Resend failed to send the email.",
-        });
-        return;
-      }
-
       response.status(200).json({
         ok: true,
-        id: emailResult.data?.id || null,
+        id: emailResult.messageId || null,
       });
     } catch (error) {
+      console.error("sendReport failed", {
+        message: error.message,
+        code: error.code,
+        command: error.command,
+        responseCode: error.responseCode,
+      });
+
       response.status(500).json({
         error: error.message || "Unable to send report.",
       });

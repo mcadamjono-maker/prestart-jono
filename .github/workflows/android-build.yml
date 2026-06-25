@@ -26,7 +26,8 @@ on:
 env:
   EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
   EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT: ${{ secrets.EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT }}
-  NODE_OPTIONS: --max_old_space_size=4096
+  EXPO_PUBLIC_JOB_LIST_URL: ${{ secrets.EXPO_PUBLIC_JOB_LIST_URL }}
+  NODE_OPTIONS: --openssl-legacy-provider --max_old_space_size=4096
 
 jobs:
   validate:
@@ -39,7 +40,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19.x"
           cache: "npm"
 
       - name: Install dependencies
@@ -47,6 +48,9 @@ jobs:
 
       - name: Check Expo dependencies
         run: npx expo install --check
+
+      - name: Check Firebase email function
+        run: node --check functions/index.js
 
       - name: Export web smoke test
         run: npx expo export --platform web --output-dir dist-ci
@@ -62,7 +66,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19.x"
           cache: "npm"
 
       - name: Setup Java

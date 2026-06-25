@@ -166,12 +166,17 @@ const EMAILJS_PURCHASE_TEMPLATE_ID =
 const EMAILJS_PUBLIC_KEY =
   process.env.EXPO_PUBLIC_EMAILJS_PUBLIC_KEY || "HUIGvg0whmV85-RLO";
 const EMAIL_RECIPIENT = "jonomcadam@hotmail.com";
+const DEFAULT_FIREBASE_REPORT_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/sendReport";
 const FIREBASE_REPORT_ENDPOINT =
-  process.env.EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT || "";
+  process.env.EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT ||
+  DEFAULT_FIREBASE_REPORT_ENDPOINT;
 const MAX_REPORT_ATTACHMENT_BYTES = 28 * 1024 * 1024;
 const PRESTART_STORAGE_PREFIX = "williams-prestart-values";
 const JOB_STORAGE_KEY = "williams-purchase-order-jobs";
-const JOB_LIST_URL = process.env.EXPO_PUBLIC_JOB_LIST_URL || "";
+const DEFAULT_JOB_LIST_URL =
+  "https://docs.google.com/spreadsheets/d/1P_KMGAMxyer0hRHwEGWnREwzwbp9cccehEmzJH8fGzg/export?format=csv&gid=0";
+const JOB_LIST_URL = process.env.EXPO_PUBLIC_JOB_LIST_URL || DEFAULT_JOB_LIST_URL;
 
 const DEFAULT_JOB_OPTIONS = [
   { number: "0902", name: "43 Rimu Street" },
@@ -390,6 +395,206 @@ const buildFiledEmail = ({ title, reference, sections }) => {
 
   return lines.join("\n");
 };
+
+const DraftTextInput = ({ value, onChangeText, onBlur, onEndEditing, ...props }) => {
+  const [draftValue, setDraftValue] = useState(value || "");
+
+  useEffect(() => {
+    setDraftValue(value || "");
+  }, [value]);
+
+  const commitDraftValue = () => {
+    if (onChangeText && draftValue !== (value || "")) {
+      onChangeText(draftValue);
+    }
+  };
+
+  return (
+    <TextInput
+      {...props}
+      value={draftValue}
+      onChangeText={setDraftValue}
+      onBlur={(event) => {
+        commitDraftValue();
+        onBlur?.(event);
+      }}
+      onEndEditing={(event) => {
+        commitDraftValue();
+        onEndEditing?.(event);
+      }}
+    />
+  );
+};
+
+const StableJobSelect = ({
+  selectedJobNumber,
+  selectedJobOption,
+  isOpen,
+  setIsOpen,
+  onSelectJob,
+  jobOptions,
+  isSubmitting,
+}) => (
+  <>
+    <View style={styles.jobPickerRow}>
+      <Pressable
+        style={[
+          styles.jobSelectButton,
+          isOpen && styles.jobSelectButtonOpen,
+          isSubmitting && styles.disabledControl,
+        ]}
+        onPress={() => setIsOpen((currentValue) => !currentValue)}
+        disabled={isSubmitting}
+        accessibilityRole="button"
+      >
+        <Text
+          style={[
+            styles.jobSelectText,
+            !selectedJobNumber && styles.jobSelectPlaceholder,
+          ]}
+        >
+          {selectedJobOption?.name || "Select job"}
+        </Text>
+        <Text style={styles.jobSelectArrow}>{isOpen ? "-" : "+"}</Text>
+      </Pressable>
+    </View>
+
+    {isOpen && (
+      <View style={styles.jobDropdownList}>
+        {jobOptions.length === 0 ? (
+          <Text style={styles.emptyJobText}>No jobs available.</Text>
+        ) : (
+          jobOptions.map((job) => {
+            const isSelected = selectedJobNumber === job.number;
+
+            return (
+              <Pressable
+                key={job.number}
+                style={[
+                  styles.jobDropdownOption,
+                  isSelected && styles.jobDropdownOptionSelected,
+                ]}
+                onPress={() => {
+                  onSelectJob(job.number);
+                  setIsOpen(false);
+                }}
+                accessibilityRole="button"
+              >
+                <Text
+                  style={[
+                    styles.jobDropdownOptionText,
+                    isSelected && styles.jobDropdownOptionTextSelected,
+                  ]}
+                >
+                  {job.name}
+                </Text>
+              </Pressable>
+            );
+          })
+        )}
+      </View>
+    )}
+  </>
+);
+
+const StableLabeledInput = ({ label, style, ...inputProps }) => (
+  <View style={styles.labeledInput}>
+    <Text style={styles.inputLabel}>{label}</Text>
+    <DraftTextInput
+      placeholder={label}
+      placeholderTextColor="#8a8a8a"
+      style={[styles.input, style]}
+      {...inputProps}
+    />
+  </View>
+);
+
+const StablePhotoPreviewList = ({ photoList }) => {
+  if (photoList.length === 0) return null;
+
+  return (
+    <View style={styles.photoPreviewGrid}>
+      {photoList.map((capturedPhoto, index) => (
+        <Image
+          key={`${capturedPhoto.uri}-${index}`}
+          source={{ uri: capturedPhoto.uri }}
+          style={styles.photoPreviewThumb}
+        />
+      ))}
+    </View>
+  );
+};
+
+const StableSignatureInk = ({ strokes, small = false }) => (
+  <Svg
+    style={styles.signatureCanvas}
+    viewBox="0 0 100 100"
+    preserveAspectRatio="none"
+    pointerEvents="none"
+  >
+    {strokes.map((stroke, strokeIndex) =>
+      stroke.length > 1 ? (
+        <Polyline
+          key={strokeIndex}
+          points={stroke.map((point) => `${point.x},${point.y}`).join(" ")}
+          fill="none"
+          stroke="#111"
+          strokeWidth={small ? 3.2 : 2.4}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : null
+    )}
+  </Svg>
+);
+
+const StableSignaturePreview = ({ strokes, small = false }) => (
+  <View style={[styles.signaturePad, small && styles.signaturePreviewSmall]}>
+    <StableSignatureInk strokes={strokes} small={small} />
+  </View>
+);
+
+const StableCheckRow = ({
+  label,
+  value,
+  answerKey,
+  isSubmitting,
+  onSetAnswer,
+}) => (
+  <View style={styles.checkRow}>
+    <Text style={styles.checkText}>{label}</Text>
+
+    <View style={styles.buttonGroup}>
+      <Pressable
+        style={[
+          styles.checkButton,
+          value === "Pass" && styles.checkButtonActive,
+          isSubmitting && styles.disabledControl,
+        ]}
+        onPress={() => onSetAnswer(answerKey, "Pass")}
+        disabled={isSubmitting}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} pass`}
+      >
+        <View style={styles.passIcon}><View style={styles.passIconShort} /><View style={styles.passIconLong} /></View>
+      </Pressable>
+
+      <Pressable
+        style={[
+          styles.xButton,
+          value === "Fail" && styles.xButtonActive,
+          isSubmitting && styles.disabledControl,
+        ]}
+        onPress={() => onSetAnswer(answerKey, "Fail")}
+        disabled={isSubmitting}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} fail`}
+      >
+        <View style={styles.failIcon}><View style={styles.failIconLine} /><View style={[styles.failIconLine, styles.failIconLineReverse]} /></View>
+      </Pressable>
+    </View>
+  </View>
+);
 
 export default function App() {
   const [activePage, setActivePage] = useState("menu");
@@ -1711,132 +1916,6 @@ export default function App() {
     resetForm();
   };
 
-  const JobSelect = ({
-    selectedJobNumber,
-    selectedJobOption,
-    isOpen,
-    setIsOpen,
-    onSelectJob,
-  }) => (
-    <>
-      <View style={styles.jobPickerRow}>
-        <Pressable
-          style={[
-            styles.jobSelectButton,
-            isOpen && styles.jobSelectButtonOpen,
-            isSubmitting && styles.disabledControl,
-          ]}
-          onPress={() => setIsOpen((currentValue) => !currentValue)}
-          disabled={isSubmitting}
-          accessibilityRole="button"
-        >
-          <Text
-            style={[
-              styles.jobSelectText,
-              !selectedJobNumber && styles.jobSelectPlaceholder,
-            ]}
-          >
-            {selectedJobOption?.name || "Select job"}
-          </Text>
-          <Text style={styles.jobSelectArrow}>{isOpen ? "-" : "+"}</Text>
-        </Pressable>
-      </View>
-
-      {isOpen && (
-        <View style={styles.jobDropdownList}>
-          {jobOptions.length === 0 ? (
-            <Text style={styles.emptyJobText}>No jobs available.</Text>
-          ) : (
-            jobOptions.map((job) => {
-              const isSelected = selectedJobNumber === job.number;
-
-              return (
-                <Pressable
-                  key={job.number}
-                  style={[
-                    styles.jobDropdownOption,
-                    isSelected && styles.jobDropdownOptionSelected,
-                  ]}
-                  onPress={() => {
-                    onSelectJob(job.number);
-                    setIsOpen(false);
-                  }}
-                  accessibilityRole="button"
-                >
-                  <Text
-                    style={[
-                      styles.jobDropdownOptionText,
-                      isSelected && styles.jobDropdownOptionTextSelected,
-                    ]}
-                  >
-                    {job.name}
-                  </Text>
-                </Pressable>
-              );
-            })
-          )}
-        </View>
-      )}
-    </>
-  );
-
-  const LabeledInput = ({ label, style, ...inputProps }) => (
-    <View style={styles.labeledInput}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <TextInput
-        placeholder={label}
-        placeholderTextColor="#8a8a8a"
-        style={[styles.input, style]}
-        {...inputProps}
-      />
-    </View>
-  );
-
-  const PhotoPreviewList = ({ photoList }) => {
-    if (photoList.length === 0) return null;
-
-    return (
-      <View style={styles.photoPreviewGrid}>
-        {photoList.map((capturedPhoto, index) => (
-          <Image
-            key={`${capturedPhoto.uri}-${index}`}
-            source={{ uri: capturedPhoto.uri }}
-            style={styles.photoPreviewThumb}
-          />
-        ))}
-      </View>
-    );
-  };
-
-  const SignatureInk = ({ strokes, small = false }) => (
-    <Svg
-      style={styles.signatureCanvas}
-      viewBox="0 0 100 100"
-      preserveAspectRatio="none"
-      pointerEvents="none"
-    >
-      {strokes.map((stroke, strokeIndex) =>
-        stroke.length > 1 ? (
-          <Polyline
-            key={strokeIndex}
-            points={stroke.map((point) => `${point.x},${point.y}`).join(" ")}
-            fill="none"
-            stroke="#111"
-            strokeWidth={small ? 3.2 : 2.4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ) : null
-      )}
-    </Svg>
-  );
-
-  const SignaturePreview = ({ strokes, small = false }) => (
-    <View style={[styles.signaturePad, small && styles.signaturePreviewSmall]}>
-      <SignatureInk strokes={strokes} small={small} />
-    </View>
-  );
-
   const CheckRow = ({ label, value, answerKey }) => (
     <View style={styles.checkRow}>
       <Text style={styles.checkText}>{label}</Text>
@@ -1853,7 +1932,7 @@ export default function App() {
           accessibilityRole="button"
           accessibilityLabel={`${label} pass`}
         >
-          <Text style={styles.tick}>✓</Text>
+          <View style={styles.passIcon}><View style={styles.passIconShort} /><View style={styles.passIconLong} /></View>
         </Pressable>
 
         <Pressable
@@ -1867,7 +1946,7 @@ export default function App() {
           accessibilityRole="button"
           accessibilityLabel={`${label} fail`}
         >
-          <Text style={styles.xText}>✕</Text>
+          <View style={styles.failIcon}><View style={styles.failIconLine} /><View style={[styles.failIconLine, styles.failIconLineReverse]} /></View>
         </Pressable>
       </View>
     </View>
@@ -1960,14 +2039,14 @@ export default function App() {
           </View>
 
           <View style={styles.card}>
-            <LabeledInput
+            <StableLabeledInput
               label="Operator Name"
               value={operator}
               onChangeText={setOperator}
               editable={!isSubmitting}
             />
 
-            <LabeledInput
+            <StableLabeledInput
               label={machineFieldLabel}
               value={machine}
               onChangeText={setMachine}
@@ -1975,7 +2054,7 @@ export default function App() {
             />
 
             {(selectedTemplate === "truck" || selectedTemplate === "digger") && (
-              <LabeledInput
+              <StableLabeledInput
                 label={selectedTemplate === "truck" ? "Hours / KMs" : "Hours"}
                 value={hours}
                 onChangeText={setHours}
@@ -1985,21 +2064,21 @@ export default function App() {
 
             {selectedTemplate === "truck" && (
               <>
-                <LabeledInput
+                <StableLabeledInput
                   label="WOF / COF Expiry"
                   value={wofExpiry}
                   onChangeText={setWofExpiry}
                   editable={!isSubmitting}
                 />
 
-                <LabeledInput
+                <StableLabeledInput
                   label="Registration Expiry"
                   value={regoExpiry}
                   onChangeText={setRegoExpiry}
                   editable={!isSubmitting}
                 />
 
-                <LabeledInput
+                <StableLabeledInput
                   label="RUC Expiry"
                   value={rucExpiry}
                   onChangeText={setRucExpiry}
@@ -2010,14 +2089,14 @@ export default function App() {
 
             {selectedTemplate === "trailer" && (
               <>
-                <LabeledInput
+                <StableLabeledInput
                   label="Trailer Registration Expiry"
                   value={regoExpiry}
                   onChangeText={setRegoExpiry}
                   editable={!isSubmitting}
                 />
 
-                <LabeledInput
+                <StableLabeledInput
                   label="Trailer WOF Expiry"
                   value={wofExpiry}
                   onChangeText={setWofExpiry}
@@ -2046,11 +2125,13 @@ export default function App() {
                     const answerKey = `${selectedTemplate}-${sectionIndex}-${itemIndex}`;
 
                     return (
-                      <CheckRow
+                      <StableCheckRow
                         key={answerKey}
                         label={item}
                         value={answers[answerKey]}
                         answerKey={answerKey}
+                        isSubmitting={isSubmitting}
+                        onSetAnswer={setAnswer}
                       />
                     );
                   })}
@@ -2072,10 +2153,10 @@ export default function App() {
               <Text style={styles.photoText}>Take Fault Photo</Text>
             </Pressable>
 
-            <PhotoPreviewList photoList={photos} />
+            <StablePhotoPreviewList photoList={photos} />
 
             <Text style={styles.inputLabel}>Fault Notes</Text>
-            <TextInput
+            <DraftTextInput
               placeholder="Describe any issues or faults..."
               placeholderTextColor="#8a8a8a"
               multiline
@@ -2114,7 +2195,7 @@ export default function App() {
               </View>
 
               <View style={styles.card}>
-                <TextInput
+                <DraftTextInput
                   placeholder="Reported By"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2123,7 +2204,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Date / Time"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2132,7 +2213,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Location"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2141,7 +2222,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Machine / Vehicle Involved"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2150,7 +2231,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Describe the incident..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2162,7 +2243,7 @@ export default function App() {
 
                 <View style={styles.inputGap} />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Action taken / immediate response..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2186,7 +2267,7 @@ export default function App() {
                   <Text style={styles.photoText}>Take Incident Photo</Text>
                 </Pressable>
 
-                <PhotoPreviewList photoList={incidentPhotos} />
+                <StablePhotoPreviewList photoList={incidentPhotos} />
               </View>
 
               <Pressable
@@ -2217,7 +2298,7 @@ export default function App() {
               </View>
 
               <View style={styles.card}>
-                <TextInput
+                <DraftTextInput
                   placeholder="Requested By"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2226,7 +2307,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Supplier"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2235,15 +2316,17 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <JobSelect
+                <StableJobSelect
                   selectedJobNumber={selectedPurchaseJob}
                   selectedJobOption={selectedPurchaseJobOption}
                   isOpen={isPurchaseJobDropdownOpen}
                   setIsOpen={setIsPurchaseJobDropdownOpen}
                   onSelectJob={setSelectedPurchaseJob}
+                  jobOptions={jobOptions}
+                  isSubmitting={isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Purchase details..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2284,15 +2367,17 @@ export default function App() {
               </View>
 
               <View style={styles.card}>
-                <JobSelect
+                <StableJobSelect
                   selectedJobNumber={selectedVariationJob}
                   selectedJobOption={selectedVariationJobOption}
                   isOpen={isVariationJobDropdownOpen}
                   setIsOpen={setIsVariationJobDropdownOpen}
                   onSelectJob={setSelectedVariationJob}
+                  jobOptions={jobOptions}
+                  isSubmitting={isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Requested By"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2301,7 +2386,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Date"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2310,7 +2395,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Client"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2319,7 +2404,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Site Address"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2328,7 +2413,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Variation Number"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2337,7 +2422,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="WDL Representative"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2346,7 +2431,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Description of variation..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2386,7 +2471,7 @@ export default function App() {
                   })}
                 </View>
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Other reason"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2396,7 +2481,7 @@ export default function App() {
                 />
 
                 <Text style={styles.formSectionTitle}>Resources Used</Text>
-                <TextInput
+                <DraftTextInput
                   placeholder="Labour description"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2404,7 +2489,7 @@ export default function App() {
                   onChangeText={setVariationLabourDescription}
                   editable={!isSubmitting}
                 />
-                <TextInput
+                <DraftTextInput
                   placeholder="Labour hours"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2413,7 +2498,7 @@ export default function App() {
                   keyboardType="decimal-pad"
                   editable={!isSubmitting}
                 />
-                <TextInput
+                <DraftTextInput
                   placeholder="Plant used"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2421,7 +2506,7 @@ export default function App() {
                   onChangeText={setVariationPlantUsed}
                   editable={!isSubmitting}
                 />
-                <TextInput
+                <DraftTextInput
                   placeholder="Plant hours"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2430,7 +2515,7 @@ export default function App() {
                   keyboardType="decimal-pad"
                   editable={!isSubmitting}
                 />
-                <TextInput
+                <DraftTextInput
                   placeholder="Materials used"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2438,7 +2523,7 @@ export default function App() {
                   onChangeText={setVariationMaterialsUsed}
                   editable={!isSubmitting}
                 />
-                <TextInput
+                <DraftTextInput
                   placeholder="Materials quantity"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2448,7 +2533,7 @@ export default function App() {
                 />
 
                 <Text style={styles.formSectionTitle}>Project Impact</Text>
-                <TextInput
+                <DraftTextInput
                   placeholder="No impact on completion date"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2456,7 +2541,7 @@ export default function App() {
                   onChangeText={setVariationImpact}
                   editable={!isSubmitting}
                 />
-                <TextInput
+                <DraftTextInput
                   placeholder="Additional time required"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2464,7 +2549,7 @@ export default function App() {
                   onChangeText={setVariationAdditionalTime}
                   editable={!isSubmitting}
                 />
-                <TextInput
+                <DraftTextInput
                   placeholder="Additional days required reason"
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2488,7 +2573,7 @@ export default function App() {
                   <Text style={styles.photoText}>Take Variation Photo</Text>
                 </Pressable>
 
-                <PhotoPreviewList photoList={variationPhotos} />
+                <StablePhotoPreviewList photoList={variationPhotos} />
               </View>
 
               <Pressable
@@ -2519,7 +2604,7 @@ export default function App() {
               </View>
 
               <View style={styles.card}>
-                <TextInput
+                <DraftTextInput
                   placeholder="Site Address"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2528,7 +2613,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Task Description"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2537,7 +2622,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Prepared By"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2546,7 +2631,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Start Date"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2555,7 +2640,7 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Finish Date"
                   placeholderTextColor="#8a8a8a"
                   style={styles.input}
@@ -2630,7 +2715,7 @@ export default function App() {
                   })}
                 </View>
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Hazards / Risks..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2674,7 +2759,7 @@ export default function App() {
                   })}
                 </View>
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Other controls / notes..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2686,7 +2771,7 @@ export default function App() {
 
                 <View style={styles.inputGap} />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Toolbox meeting notes..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2698,7 +2783,7 @@ export default function App() {
 
                 <View style={styles.inputGap} />
 
-                <TextInput
+                <DraftTextInput
                   placeholder="Worker / contractor sign-off notes..."
                   placeholderTextColor="#8a8a8a"
                   multiline
@@ -2749,7 +2834,7 @@ export default function App() {
                         ]}
                       >
                         {hasHazardSignOnConfirmed && (
-                          <Text style={styles.checkboxTick}>✓</Text>
+                          <View style={styles.checkboxTickIcon}><View style={styles.checkboxTickShort} /><View style={styles.checkboxTickLong} /></View>
                         )}
                       </View>
                       <Text style={styles.checkboxText}>
@@ -2759,7 +2844,7 @@ export default function App() {
 
                     <View style={styles.labeledInput}>
                       <Text style={styles.inputLabel}>Name</Text>
-                      <TextInput
+                      <DraftTextInput
                         placeholder="Name"
                         placeholderTextColor="#8a8a8a"
                         style={styles.input}
@@ -2779,7 +2864,7 @@ export default function App() {
                       }}
                       {...signaturePanResponder.panHandlers}
                     >
-                      <SignatureInk strokes={hazardSignatureStrokes} />
+                      <StableSignatureInk strokes={hazardSignatureStrokes} />
                     </View>
 
                     <View style={styles.signOnActions}>
@@ -2823,7 +2908,7 @@ export default function App() {
                           <Text style={styles.signOnName}>{signOn.name}</Text>
                           <Text style={styles.signOnTime}>{signOn.signedAt}</Text>
                         </View>
-                        <SignaturePreview
+                        <StableSignaturePreview
                           strokes={signOn.signatureStrokes}
                           small
                         />
@@ -3077,6 +3162,34 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
+  passIcon: {
+    width: 22,
+    height: 18,
+    position: "relative",
+  },
+
+  passIconShort: {
+    position: "absolute",
+    left: 3,
+    top: 9,
+    width: 8,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#000",
+    transform: [{ rotate: "45deg" }],
+  },
+
+  passIconLong: {
+    position: "absolute",
+    left: 8,
+    top: 6,
+    width: 14,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#000",
+    transform: [{ rotate: "-48deg" }],
+  },
+
   xButton: {
     width: 44,
     height: 44,
@@ -3096,6 +3209,26 @@ const styles = StyleSheet.create({
     color: "#000",
     fontSize: 22,
     fontWeight: "800",
+  },
+
+  failIcon: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  failIconLine: {
+    position: "absolute",
+    width: 22,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#000",
+    transform: [{ rotate: "45deg" }],
+  },
+
+  failIconLineReverse: {
+    transform: [{ rotate: "-45deg" }],
   },
 
   photoButton: {
@@ -3250,6 +3383,34 @@ const styles = StyleSheet.create({
     color: "#000",
     fontSize: 19,
     fontWeight: "900",
+  },
+
+  checkboxTickIcon: {
+    width: 18,
+    height: 14,
+    position: "relative",
+  },
+
+  checkboxTickShort: {
+    position: "absolute",
+    left: 2,
+    top: 7,
+    width: 7,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#000",
+    transform: [{ rotate: "45deg" }],
+  },
+
+  checkboxTickLong: {
+    position: "absolute",
+    left: 7,
+    top: 5,
+    width: 11,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#000",
+    transform: [{ rotate: "-48deg" }],
   },
 
   checkboxText: {
@@ -3469,3 +3630,5 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 });
+
+
