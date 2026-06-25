@@ -22,6 +22,35 @@ const normaliseSubject = (subject) =>
 const normaliseReportType = (reportType) =>
   String(reportType || "report").replace(/[^a-zA-Z0-9 _-]/g, "").trim();
 
+const formatReportHeading = (reportType) => {
+  const cleanedReportType = normaliseReportType(reportType)
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const knownReportHeadings = {
+    prestart: "Prestart Checklist",
+    "prestart checklist": "Prestart Checklist",
+    incident: "Incident Report",
+    "incident report": "Incident Report",
+    "purchase order": "Purchase Order Request",
+    "purchase order request": "Purchase Order Request",
+    "job variation": "Job Variation Request",
+    "job variation request": "Job Variation Request",
+    "hazard id": "Hazard ID",
+    "hazard identification worksheet": "Hazard ID",
+  };
+  const lowerReportType = cleanedReportType.toLowerCase();
+
+  if (knownReportHeadings[lowerReportType]) {
+    return knownReportHeadings[lowerReportType];
+  }
+
+  return (
+    cleanedReportType.replace(/\b[a-z]/g, (letter) => letter.toUpperCase()) ||
+    "Report"
+  );
+};
+
 const normaliseRecipientEmail = (email) => {
   const recipientEmail = String(email || "").trim();
 
@@ -57,7 +86,7 @@ const buildReportHtml = ({ reportType, subject, message }) => `
       <p style="margin: 0; color: #555; font-size: 12px; letter-spacing: 1px; text-transform: uppercase;">
         Williams Drainage Limited
       </p>
-      <h2 style="margin: 4px 0 0; font-size: 24px;">${escapeHtml(reportType)}</h2>
+      <h2 style="margin: 4px 0 0; font-size: 24px;">${escapeHtml(formatReportHeading(reportType))}</h2>
     </div>
 
     <table style="border-collapse: collapse; width: 100%; margin-bottom: 18px;">

@@ -502,6 +502,32 @@ const SettingsGearIcon = () => (
   </Svg>
 );
 
+const PassCheckIcon = ({ active }) => (
+  <Svg width={26} height={22} viewBox="0 0 24 24" pointerEvents="none">
+    <Path
+      d="M4.5 12.7 9.3 17.2 19.5 6.8"
+      fill="none"
+      stroke={active ? "#000" : "#D7FF2F"}
+      strokeWidth={3.1}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+const FailCrossIcon = ({ active }) => (
+  <Svg width={24} height={24} viewBox="0 0 24 24" pointerEvents="none">
+    <Path
+      d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"
+      fill="none"
+      stroke={active ? "#000" : "#ff4444"}
+      strokeWidth={3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
 const StableJobSelect = ({
   selectedJobNumber,
   selectedJobOption,
@@ -652,7 +678,7 @@ const StableCheckRow = ({
         accessibilityRole="button"
         accessibilityLabel={`${label} pass`}
       >
-        <View style={styles.passIcon}><View style={styles.passIconShort} /><View style={styles.passIconLong} /></View>
+        <PassCheckIcon active={value === "Pass"} />
       </Pressable>
 
       <Pressable
@@ -666,7 +692,7 @@ const StableCheckRow = ({
         accessibilityRole="button"
         accessibilityLabel={`${label} fail`}
       >
-        <View style={styles.failIcon}><View style={styles.failIconLine} /><View style={[styles.failIconLine, styles.failIconLineReverse]} /></View>
+        <FailCrossIcon active={value === "Fail"} />
       </Pressable>
     </View>
   </View>
@@ -728,10 +754,6 @@ export default function App() {
   const [variationPlantHours, setVariationPlantHours] = useState("");
   const [variationMaterialsUsed, setVariationMaterialsUsed] = useState("");
   const [variationMaterialsQuantity, setVariationMaterialsQuantity] =
-    useState("");
-  const [variationImpact, setVariationImpact] = useState("");
-  const [variationAdditionalTime, setVariationAdditionalTime] = useState("");
-  const [variationAdditionalDaysReason, setVariationAdditionalDaysReason] =
     useState("");
   const [variationPhotos, setVariationPhotos] = useState([]);
   const [hazardSiteAddress, setHazardSiteAddress] = useState("");
@@ -1220,9 +1242,6 @@ export default function App() {
     setVariationPlantHours("");
     setVariationMaterialsUsed("");
     setVariationMaterialsQuantity("");
-    setVariationImpact("");
-    setVariationAdditionalTime("");
-    setVariationAdditionalDaysReason("");
     setVariationPhotos([]);
     setIsVariationJobDropdownOpen(false);
   };
@@ -1596,7 +1615,7 @@ export default function App() {
       };
 
       const sentByFirebase = await sendFirebaseReport({
-        reportType: "prestart",
+        reportType: "Prestart Checklist",
         subject,
         message,
         fields,
@@ -1720,7 +1739,7 @@ export default function App() {
       };
 
       const sentByFirebase = await sendFirebaseReport({
-        reportType: "incident",
+        reportType: "Incident Report",
         subject,
         message,
         fields,
@@ -1857,7 +1876,7 @@ export default function App() {
       };
 
       const sentByFirebase = await sendFirebaseReport({
-        reportType: "purchase_order",
+        reportType: "Purchase Order Request",
         subject,
         message,
         fields: purchaseFields,
@@ -1968,17 +1987,6 @@ export default function App() {
               ["Materials Quantity", variationMaterialsQuantity.trim()],
             ],
           },
-          {
-            title: "Project Impact",
-            rows: [
-              ["No Impact on Completion Date", variationImpact.trim()],
-              ["Additional Time Required", variationAdditionalTime.trim()],
-              [
-                "Additional Days Required Reason",
-                variationAdditionalDaysReason.trim(),
-              ],
-            ],
-          },
         ],
       });
       const variationFields = {
@@ -1998,7 +2006,7 @@ export default function App() {
       };
 
       const sentByFirebase = await sendFirebaseReport({
-        reportType: "job_variation",
+        reportType: "Job Variation Request",
         subject,
         message,
         fields: variationFields,
@@ -2122,7 +2130,7 @@ export default function App() {
       };
 
       const sentByFirebase = await sendFirebaseReport({
-        reportType: "hazard_id",
+        reportType: "Hazard ID",
         subject,
         message,
         fields: hazardFields,
@@ -2187,7 +2195,7 @@ export default function App() {
           accessibilityRole="button"
           accessibilityLabel={`${label} pass`}
         >
-          <View style={styles.passIcon}><View style={styles.passIconShort} /><View style={styles.passIconLong} /></View>
+          <PassCheckIcon active={value === "Pass"} />
         </Pressable>
 
         <Pressable
@@ -2201,7 +2209,7 @@ export default function App() {
           accessibilityRole="button"
           accessibilityLabel={`${label} fail`}
         >
-          <View style={styles.failIcon}><View style={styles.failIconLine} /><View style={[styles.failIconLine, styles.failIconLineReverse]} /></View>
+          <FailCrossIcon active={value === "Fail"} />
         </Pressable>
       </View>
     </View>
@@ -2795,7 +2803,7 @@ export default function App() {
               <View style={styles.pageHeader}>
                 <Text style={styles.pageTitle}>Job Variation</Text>
                 <Text style={styles.pageSubtitle}>
-                  Record extra work, scope changes, impact, and supporting details.
+                  Record extra work, scope changes, and supporting details.
                 </Text>
               </View>
 
@@ -2962,33 +2970,6 @@ export default function App() {
                   style={styles.input}
                   value={variationMaterialsQuantity}
                   onChangeText={setVariationMaterialsQuantity}
-                  editable={!isSubmitting}
-                />
-
-                <Text style={styles.formSectionTitle}>Project Impact</Text>
-                <DraftTextInput
-                  placeholder="No impact on completion date"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationImpact}
-                  onChangeText={setVariationImpact}
-                  editable={!isSubmitting}
-                />
-                <DraftTextInput
-                  placeholder="Additional time required"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationAdditionalTime}
-                  onChangeText={setVariationAdditionalTime}
-                  editable={!isSubmitting}
-                />
-                <DraftTextInput
-                  placeholder="Additional days required reason"
-                  placeholderTextColor="#8a8a8a"
-                  multiline
-                  style={styles.notes}
-                  value={variationAdditionalDaysReason}
-                  onChangeText={setVariationAdditionalDaysReason}
                   editable={!isSubmitting}
                 />
 
@@ -3615,40 +3596,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#D7FF2F",
   },
 
-  tick: {
-    color: "#000",
-    fontSize: 24,
-    fontWeight: "800",
-  },
-
-  passIcon: {
-    width: 22,
-    height: 18,
-    position: "relative",
-  },
-
-  passIconShort: {
-    position: "absolute",
-    left: 3,
-    top: 9,
-    width: 8,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#000",
-    transform: [{ rotate: "45deg" }],
-  },
-
-  passIconLong: {
-    position: "absolute",
-    left: 8,
-    top: 6,
-    width: 14,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#000",
-    transform: [{ rotate: "-48deg" }],
-  },
-
   xButton: {
     width: 44,
     height: 44,
@@ -3662,32 +3609,6 @@ const styles = StyleSheet.create({
 
   xButtonActive: {
     backgroundColor: "#ff4444",
-  },
-
-  xText: {
-    color: "#000",
-    fontSize: 22,
-    fontWeight: "800",
-  },
-
-  failIcon: {
-    width: 22,
-    height: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  failIconLine: {
-    position: "absolute",
-    width: 22,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#000",
-    transform: [{ rotate: "45deg" }],
-  },
-
-  failIconLineReverse: {
-    transform: [{ rotate: "-45deg" }],
   },
 
   photoButton: {
