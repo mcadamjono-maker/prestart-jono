@@ -7,6 +7,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "email-server": "node scripts/local-email-server.js",
+    "firebase:deploy": "npm --prefix functions install && npx firebase-tools deploy --only functions",
+    "firebase:serve": "npm --prefix functions install && npx firebase-tools emulators:start --only functions",
     "preview-web": "node scripts/static-preview-server.js",
     "web": "expo start --web"
   },
@@ -15,6 +17,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@sendgrid/mail": "^8.1.6",
     "expo": "~55.0.26",
+    "expo-file-system": "~55.0.22",
     "expo-image-manipulator": "~55.0.17",
     "expo-image-picker": "~55.0.20",
     "expo-mail-composer": "~55.0.14",

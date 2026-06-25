@@ -25,6 +25,7 @@ on:
 
 env:
   EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+  EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT: ${{ secrets.EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT }}
   NODE_OPTIONS: --max_old_space_size=4096
 
 jobs:

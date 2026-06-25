@@ -22,6 +22,7 @@ import Svg, { Polyline } from "react-native-svg";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { EmailJSResponseStatus, send } from "@emailjs/react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as MailComposer from "expo-mail-composer";
@@ -165,6 +166,9 @@ const EMAILJS_PURCHASE_TEMPLATE_ID =
 const EMAILJS_PUBLIC_KEY =
   process.env.EXPO_PUBLIC_EMAILJS_PUBLIC_KEY || "HUIGvg0whmV85-RLO";
 const EMAIL_RECIPIENT = "jonomcadam@hotmail.com";
+const FIREBASE_REPORT_ENDPOINT =
+  process.env.EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT || "";
+const MAX_REPORT_ATTACHMENT_BYTES = 28 * 1024 * 1024;
 const PRESTART_STORAGE_PREFIX = "williams-prestart-values";
 const JOB_STORAGE_KEY = "williams-purchase-order-jobs";
 const JOB_LIST_URL = process.env.EXPO_PUBLIC_JOB_LIST_URL || "";
@@ -803,6 +807,79 @@ export default function App() {
       ? error.text || `EmailJS returned status ${error.status}.`
       : error.message || String(error);
 
+  const createPhotoAttachments = async (photoList, filenamePrefix) => {
+    let totalBytes = 0;
+    const attachments = [];
+
+    for (const [index, capturedPhoto] of photoList.entries()) {
+      const base64Content = await FileSystem.readAsStringAsync(
+        capturedPhoto.uri,
+        { encoding: FileSystem.EncodingType.Base64 }
+      );
+      const estimatedBytes = Math.ceil((base64Content.length * 3) / 4);
+
+      totalBytes += estimatedBytes;
+
+      if (totalBytes > MAX_REPORT_ATTACHMENT_BYTES) {
+        throw new Error(
+          "The selected photos are too large to send. Please use fewer photos."
+        );
+      }
+
+      attachments.push({
+        filename:
+          capturedPhoto.fileName ||
+          `${filenamePrefix}-${String(index + 1).padStart(2, "0")}.jpg`,
+        content: base64Content,
+        contentType: capturedPhoto.mimeType || "image/jpeg",
+      });
+    }
+
+    return attachments;
+  };
+
+  const sendFirebaseReport = async ({
+    reportType,
+    subject,
+    message,
+    fields = {},
+    photoList = [],
+    photoFilenamePrefix = "report-photo",
+  }) => {
+    const endpoint = FIREBASE_REPORT_ENDPOINT.trim();
+
+    if (!endpoint) {
+      return false;
+    }
+
+    const attachments = await createPhotoAttachments(
+      photoList,
+      photoFilenamePrefix
+    );
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        reportType,
+        subject,
+        message,
+        fields,
+        attachments,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(
+        errorBody.error || `Report email failed with status ${response.status}.`
+      );
+    }
+
+    return true;
+  };
+
   const sendEmailReport = async ({
     subject,
     message,
@@ -1058,7 +1135,18 @@ export default function App() {
             : "No fault photos captured.",
       };
 
-      if (photoAttachments.length > 0) {
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "prestart",
+        subject,
+        message,
+        fields,
+        photoList: photos,
+        photoFilenamePrefix: "prestart-photo",
+      });
+
+      if (sentByFirebase) {
+        successMessage = "Checklist emailed successfully.";
+      } else if (photoAttachments.length > 0) {
         const canCompose = await MailComposer.isAvailableAsync();
 
         if (!canCompose) {
@@ -1171,7 +1259,18 @@ export default function App() {
             : "No incident photos captured.",
       };
 
-      if (incidentPhotoAttachments.length > 0) {
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "incident",
+        subject,
+        message,
+        fields,
+        photoList: incidentPhotos,
+        photoFilenamePrefix: "incident-photo",
+      });
+
+      if (sentByFirebase) {
+        successMessage = "Incident report emailed successfully.";
+      } else if (incidentPhotoAttachments.length > 0) {
         const canCompose = await MailComposer.isAvailableAsync();
 
         if (!canCompose) {
@@ -1297,7 +1396,16 @@ export default function App() {
         email_body: message,
       };
 
-      if (EMAILJS_PURCHASE_TEMPLATE_ID) {
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "purchase_order",
+        subject,
+        message,
+        fields: purchaseFields,
+      });
+
+      if (sentByFirebase) {
+        // Sent through Firebase/Resend.
+      } else if (EMAILJS_PURCHASE_TEMPLATE_ID) {
         await sendEmailReport({
           subject,
           message,
@@ -1413,6 +1521,36 @@ export default function App() {
           },
         ],
       });
+      const variationFields = {
+        report_type: "Job Variation Request",
+        template: "job_variation",
+        job_number: selectedVariationJob,
+        job_name: selectedVariationJobOption?.name || "",
+        requested_by: variationRequestedBy.trim(),
+        variation_number: variationNumber.trim() || "Not supplied",
+        site_address: variationSiteAddress.trim() || "Not supplied",
+        description: variationDescription.trim(),
+        reasons: selectedReasons,
+        photos:
+          variationPhotos.length > 0
+            ? `${variationPhotos.length} photo(s) captured`
+            : "No photos captured",
+      };
+
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "job_variation",
+        subject,
+        message,
+        fields: variationFields,
+        photoList: variationPhotos,
+        photoFilenamePrefix: "variation-photo",
+      });
+
+      if (sentByFirebase) {
+        Alert.alert("Success", "Variation request emailed successfully.");
+        resetVariationForm();
+        return;
+      }
 
       const canCompose = await MailComposer.isAvailableAsync();
 
@@ -1512,6 +1650,29 @@ export default function App() {
           },
         ],
       });
+      const hazardFields = {
+        report_type: "Hazard Identification Worksheet",
+        template: "hazard_id",
+        site_address: hazardSiteAddress.trim(),
+        task_description: hazardTaskDescription.trim(),
+        prepared_by: hazardPreparedBy.trim(),
+        start_date: hazardStartDate.trim() || "Not supplied",
+        finish_date: hazardFinishDate.trim() || "Not supplied",
+        signed_on_workers: getHazardSignOnSummary(),
+      };
+
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "hazard_id",
+        subject,
+        message,
+        fields: hazardFields,
+      });
+
+      if (sentByFirebase) {
+        Alert.alert("Success", "Hazard ID emailed successfully.");
+        resetHazardForm();
+        return;
+      }
 
       const canCompose = await MailComposer.isAvailableAsync();
 

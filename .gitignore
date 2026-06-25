@@ -6,6 +6,7 @@ node_modules/
 # Expo
 .expo/
 dist/
+dist-*/
 dist-test/
 dist-test-*/
 dist-ci-local/
@@ -46,6 +47,8 @@ expo-dev-client*.log
 
 # local env files
 .env*.local
+functions/.env
+functions/.env.*
 
 # typescript
 *.tsbuildinfo
