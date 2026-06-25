@@ -5,6 +5,8 @@ const MAX_BASE64_ATTACHMENT_CHARS = 36 * 1024 * 1024;
 const DEFAULT_TO_EMAIL = "jonomcadam@hotmail.com";
 const DEFAULT_FROM_EMAIL = "WDL Field Forms <no-reply@maileroo.com>";
 const DEFAULT_SMTP_HOST = "smtp.maileroo.com";
+const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
+const ALLOWED_RECIPIENT_EMAILS = [DEFAULT_TO_EMAIL.toLowerCase()];
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -19,6 +21,30 @@ const normaliseSubject = (subject) =>
 
 const normaliseReportType = (reportType) =>
   String(reportType || "report").replace(/[^a-zA-Z0-9 _-]/g, "").trim();
+
+const normaliseRecipientEmail = (email) => {
+  const recipientEmail = String(email || "").trim();
+
+  if (!recipientEmail) return smtpTo;
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+    throw new Error("Recipient email is not valid.");
+  }
+
+  const lowerRecipientEmail = recipientEmail.toLowerCase();
+  const recipientDomain = lowerRecipientEmail.split("@").pop();
+
+  if (
+    !ALLOWED_RECIPIENT_EMAILS.includes(lowerRecipientEmail) &&
+    !ALLOWED_RECIPIENT_DOMAINS.includes(recipientDomain)
+  ) {
+    throw new Error(
+      "Recipient email must be the default address or a Williams Drainage email address."
+    );
+  }
+
+  return recipientEmail;
+};
 
 const normaliseFilename = (filename, index) =>
   String(filename || `report-photo-${index + 1}.jpg`)
@@ -115,6 +141,9 @@ exports.sendReport = onRequest(
       const reportType = normaliseReportType(request.body?.reportType);
       const subject = normaliseSubject(request.body?.subject);
       const message = String(request.body?.message || "").trim();
+      const recipientEmail = normaliseRecipientEmail(
+        request.body?.recipientEmail || request.body?.fields?.recipient_email
+      );
 
       if (!message) {
         response.status(400).json({ error: "Report message is required." });
@@ -137,7 +166,7 @@ exports.sendReport = onRequest(
 
       const emailResult = await transporter.sendMail({
         from: smtpFrom,
-        to: smtpTo,
+        to: recipientEmail,
         replyTo: smtpReplyTo,
         subject,
         text: message,
