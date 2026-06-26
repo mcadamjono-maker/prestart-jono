@@ -97,7 +97,7 @@ jobs:
           NODE_ENV: production
 
       - name: Build production AAB
-        if: github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'prod-aab'
+        if: github.event_name == 'push' || github.event.inputs.buildType == 'all' || github.event.inputs.buildType == 'prod-aab'
         run: npx eas-cli@latest build --platform android --profile production --local --non-interactive --output ./WDL-Field-Forms.aab
         env:
           NODE_ENV: production
