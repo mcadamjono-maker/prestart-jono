@@ -38,6 +38,8 @@ const formatReportHeading = (reportType) => {
     "job variation request": "Job Variation Request",
     "hazard id": "Hazard ID",
     "hazard identification worksheet": "Hazard ID",
+    "as built": "As-Built Plan",
+    "as built plan": "As-Built Plan",
   };
   const lowerReportType = cleanedReportType.toLowerCase();
 

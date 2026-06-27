@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +18,13 @@ import {
   SafeAreaProvider,
   SafeAreaView,
 } from "react-native-safe-area-context";
-import Svg, { Circle, Path, Polyline } from "react-native-svg";
+import Svg, {
+  Circle,
+  Line,
+  Path,
+  Polyline,
+  Text as SvgText,
+} from "react-native-svg";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { EmailJSResponseStatus, send } from "@emailjs/react-native";
@@ -151,6 +157,11 @@ const APP_TABS = [
     label: "Hazard ID",
     description: "Complete a site task analysis",
   },
+  {
+    key: "asbuilt",
+    label: "As-Built's",
+    description: "Sketch drainage plans and file the drawing",
+  },
 ];
 
 const EMAILJS_SERVICE_ID =
@@ -187,6 +198,29 @@ const JOB_STORAGE_KEY = "williams-purchase-order-jobs";
 const DEFAULT_JOB_LIST_URL =
   "https://docs.google.com/spreadsheets/d/1P_KMGAMxyer0hRHwEGWnREwzwbp9cccehEmzJH8fGzg/export?format=csv&gid=0";
 const JOB_LIST_URL = process.env.EXPO_PUBLIC_JOB_LIST_URL || DEFAULT_JOB_LIST_URL;
+const GOOGLE_STATIC_MAPS_API_KEY =
+  process.env.EXPO_PUBLIC_GOOGLE_STATIC_MAPS_API_KEY || "";
+
+const AS_BUILT_LINE_COLORS = [
+  { label: "Red", value: "#ff2f2f" },
+  { label: "Green", value: "#36d957" },
+  { label: "Black", value: "#111111" },
+];
+const AS_BUILT_LINE_WIDTHS = [
+  { label: "Thin", value: "thin", strokeWidth: 1.8 },
+  { label: "Thick", value: "thick", strokeWidth: 4.2 },
+];
+const AS_BUILT_LINE_STYLES = [
+  { label: "Solid", value: "solid" },
+  { label: "Dotted", value: "dotted" },
+];
+const AS_BUILT_SYMBOLS = [
+  { label: "IP", value: "inspection_point", shortLabel: "IP" },
+  { label: "GT", value: "gully_trap", shortLabel: "GT" },
+  { label: "Vent", value: "vent", shortLabel: "V" },
+  { label: "MH", value: "manhole", shortLabel: "MH" },
+  { label: "CP", value: "cesspit", shortLabel: "CP" },
+];
 
 const DEFAULT_JOB_OPTIONS = [
   { number: "0902", name: "43 Rimu Street" },
@@ -435,6 +469,159 @@ const buildFiledEmail = ({ title, reference, sections }) => {
   return lines.join("\n");
 };
 
+const escapeXml = (value) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+
+const clampPercentage = (value) => Math.max(0, Math.min(100, value));
+
+const clampAsBuiltPoint = (point) => ({
+  x: clampPercentage(point.x),
+  y: clampPercentage(point.y),
+});
+
+const snapAsBuiltLineEnd = (startPoint, endPoint) => {
+  const deltaX = endPoint.x - startPoint.x;
+  const deltaY = endPoint.y - startPoint.y;
+  const distance = Math.hypot(deltaX, deltaY);
+
+  if (distance < 0.1) {
+    return endPoint;
+  }
+
+  const snappedAngle =
+    Math.round(Math.atan2(deltaY, deltaX) / (Math.PI / 4)) * (Math.PI / 4);
+
+  return clampAsBuiltPoint({
+    x: startPoint.x + Math.cos(snappedAngle) * distance,
+    y: startPoint.y + Math.sin(snappedAngle) * distance,
+  });
+};
+
+const createAsBuiltMapUrl = (address, apiKey) => {
+  const cleanedAddress = String(address || "").trim();
+  const cleanedApiKey = String(apiKey || "").trim();
+
+  if (!cleanedAddress || !cleanedApiKey) return "";
+
+  const params = new URLSearchParams({
+    center: cleanedAddress,
+    zoom: "20",
+    size: "640x640",
+    scale: "2",
+    maptype: "roadmap",
+    key: cleanedApiKey,
+  });
+
+  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+};
+
+const getAsBuiltColorLabel = (colorValue) =>
+  AS_BUILT_LINE_COLORS.find((color) => color.value === colorValue)?.label ||
+  "Custom";
+
+const getAsBuiltWidthLabel = (widthValue) =>
+  AS_BUILT_LINE_WIDTHS.find((width) => width.value === widthValue)?.label ||
+  "Custom";
+
+const getAsBuiltWidth = (widthValue) =>
+  AS_BUILT_LINE_WIDTHS.find((width) => width.value === widthValue)
+    ?.strokeWidth || AS_BUILT_LINE_WIDTHS[0].strokeWidth;
+
+const getAsBuiltStyleLabel = (styleValue) =>
+  AS_BUILT_LINE_STYLES.find((style) => style.value === styleValue)?.label ||
+  "Solid";
+
+const getAsBuiltSymbol = (symbolValue) =>
+  AS_BUILT_SYMBOLS.find((symbol) => symbol.value === symbolValue) ||
+  AS_BUILT_SYMBOLS[0];
+
+const buildAsBuiltSvg = ({
+  address,
+  preparedBy,
+  notes,
+  lines,
+  symbols,
+  mapUrl,
+}) => {
+  const lineMarkup = lines
+    .map((line) => {
+      const strokeWidth = getAsBuiltWidth(line.width);
+      const dashMarkup =
+        line.style === "dotted" ? ' stroke-dasharray="1.8 3.2"' : "";
+
+      return `<line x1="${line.start.x.toFixed(2)}" y1="${line.start.y.toFixed(
+        2
+      )}" x2="${line.end.x.toFixed(2)}" y2="${line.end.y.toFixed(
+        2
+      )}" stroke="${escapeXml(line.color)}" stroke-width="${strokeWidth}"${dashMarkup} stroke-linecap="round" />`;
+    })
+    .join("\n");
+  const symbolMarkup = symbols
+    .map((symbol) => {
+      const symbolConfig = getAsBuiltSymbol(symbol.type);
+
+      return `
+        <circle cx="${symbol.x.toFixed(2)}" cy="${symbol.y.toFixed(
+        2
+      )}" r="3.6" fill="#ffffff" stroke="#111111" stroke-width="0.9" />
+        <text x="${symbol.x.toFixed(2)}" y="${(symbol.y + 1.25).toFixed(
+        2
+      )}" text-anchor="middle" font-family="Arial, sans-serif" font-size="2.7" font-weight="700" fill="#111111">${escapeXml(
+        symbolConfig.shortLabel
+      )}</text>`;
+    })
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1400" viewBox="0 0 100 118">
+  <rect width="100" height="118" fill="#ffffff" />
+  <text x="4" y="6" font-family="Arial, sans-serif" font-size="4.5" font-weight="700" fill="#111111">Williams Drainage Limited - As-Built Plan</text>
+  <text x="4" y="11" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Address: ${escapeXml(
+    address || "Not supplied"
+  )}</text>
+  <text x="4" y="15" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Prepared by: ${escapeXml(
+    preparedBy || "Not supplied"
+  )}</text>
+  <text x="4" y="19" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Submitted: ${escapeXml(
+    getSubmittedAt()
+  )}</text>
+  ${
+    mapUrl
+      ? `<text x="4" y="23" font-family="Arial, sans-serif" font-size="2.2" fill="#555555">Map template used: ${escapeXml(
+          mapUrl
+        )}</text>`
+      : ""
+  }
+  <rect x="4" y="27" width="92" height="82" fill="#fbfbfb" stroke="#222222" stroke-width="0.7" />
+  <g transform="translate(4 27) scale(0.92 0.82)">
+    <g stroke="#d6d6d6" stroke-width="0.16">
+      ${Array.from({ length: 11 })
+        .map(
+          (_, index) =>
+            `<line x1="${index * 10}" y1="0" x2="${index * 10}" y2="100" />`
+        )
+        .join("\n")}
+      ${Array.from({ length: 11 })
+        .map(
+          (_, index) =>
+            `<line x1="0" y1="${index * 10}" x2="100" y2="${index * 10}" />`
+        )
+        .join("\n")}
+    </g>
+    ${lineMarkup}
+    ${symbolMarkup}
+  </g>
+  <text x="4" y="114" font-family="Arial, sans-serif" font-size="2.4" fill="#333333">Notes: ${escapeXml(
+    notes || "None"
+  )}</text>
+</svg>`;
+};
+
 const DraftTextInput = ({
   value,
   onChangeText,
@@ -527,6 +714,33 @@ const FailCrossIcon = ({ active }) => (
     />
   </Svg>
 );
+
+const StableAsBuiltSymbol = ({ symbol }) => {
+  const symbolConfig = getAsBuiltSymbol(symbol.type);
+
+  return (
+    <>
+      <Circle
+        cx={symbol.x}
+        cy={symbol.y}
+        r={4.1}
+        fill="#fff"
+        stroke="#111"
+        strokeWidth={1.1}
+      />
+      <SvgText
+        x={symbol.x}
+        y={symbol.y + 1.45}
+        fill="#111"
+        fontSize={3.2}
+        fontWeight="800"
+        textAnchor="middle"
+      >
+        {symbolConfig.shortLabel}
+      </SvgText>
+    </>
+  );
+};
 
 const StableJobSelect = ({
   selectedJobNumber,
@@ -779,7 +993,32 @@ export default function App() {
     height: 1,
   });
   const [isDrawingSignature, setIsDrawingSignature] = useState(false);
+  const [asBuiltAddress, setAsBuiltAddress] = useState("");
+  const [asBuiltPreparedBy, setAsBuiltPreparedBy] = useState("");
+  const [asBuiltNotes, setAsBuiltNotes] = useState("");
+  const [asBuiltLineColor, setAsBuiltLineColor] = useState(
+    AS_BUILT_LINE_COLORS[0].value
+  );
+  const [asBuiltLineWidth, setAsBuiltLineWidth] = useState(
+    AS_BUILT_LINE_WIDTHS[0].value
+  );
+  const [asBuiltLineStyle, setAsBuiltLineStyle] = useState(
+    AS_BUILT_LINE_STYLES[0].value
+  );
+  const [asBuiltTool, setAsBuiltTool] = useState("line");
+  const [asBuiltLines, setAsBuiltLines] = useState([]);
+  const [asBuiltSymbols, setAsBuiltSymbols] = useState([]);
+  const [currentAsBuiltLine, setCurrentAsBuiltLine] = useState(null);
+  const [asBuiltBoardSize, setAsBuiltBoardSize] = useState({
+    width: 1,
+    height: 1,
+  });
+  const [isDrawingAsBuilt, setIsDrawingAsBuilt] = useState(false);
+  const [settingsGoogleMapsApiKey, setSettingsGoogleMapsApiKey] = useState(
+    GOOGLE_STATIC_MAPS_API_KEY
+  );
   const [hasLoadedJobs, setHasLoadedJobs] = useState(false);
+  const asBuiltLineStartRef = useRef(null);
 
   const checklist = CHECKLIST_TEMPLATES[selectedTemplate];
   const machineFieldLabel =
@@ -791,6 +1030,10 @@ export default function App() {
   );
   const selectedVariationJobOption = jobOptions.find(
     (job) => job.number === selectedVariationJob
+  );
+  const asBuiltMapImageUrl = useMemo(
+    () => createAsBuiltMapUrl(asBuiltAddress, settingsGoogleMapsApiKey),
+    [asBuiltAddress, settingsGoogleMapsApiKey]
   );
 
   const answersSummary = useMemo(
@@ -840,6 +1083,10 @@ export default function App() {
         ) {
           setRecipientEmail(savedRecipientEmail);
           setSettingsRecipientEmail(savedRecipientEmail);
+        }
+
+        if (typeof parsedSettings.googleMapsStaticApiKey === "string") {
+          setSettingsGoogleMapsApiKey(parsedSettings.googleMapsStaticApiKey);
         }
       } catch (error) {
         console.warn("Unable to load settings", error);
@@ -999,6 +1246,16 @@ export default function App() {
     saveJobs();
   }, [hasLoadedJobs, jobOptions]);
 
+  const saveSettings = async (nextSettings) => {
+    const settings = {
+      recipientEmail,
+      googleMapsStaticApiKey: settingsGoogleMapsApiKey,
+      ...nextSettings,
+    };
+
+    await AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  };
+
   const saveRecipientEmailSetting = async (email) => {
     const nextRecipientEmail = normalizeEmailAddress(email);
 
@@ -1018,10 +1275,7 @@ export default function App() {
     try {
       setRecipientEmail(nextRecipientEmail);
       setSettingsRecipientEmail(nextRecipientEmail);
-      await AsyncStorage.setItem(
-        SETTINGS_STORAGE_KEY,
-        JSON.stringify({ recipientEmail: nextRecipientEmail })
-      );
+      await saveSettings({ recipientEmail: nextRecipientEmail });
       Alert.alert(
         "Settings Saved",
         `Reports will now send to ${nextRecipientEmail}.`
@@ -1039,6 +1293,18 @@ export default function App() {
   const restoreDefaultRecipient = async () => {
     setIsSettingsEmailDropdownOpen(false);
     saveRecipientEmailSetting(DEFAULT_EMAIL_RECIPIENT);
+  };
+
+  const saveGoogleMapsApiKeySetting = async () => {
+    try {
+      await saveSettings({
+        googleMapsStaticApiKey: settingsGoogleMapsApiKey.trim(),
+      });
+      setSettingsGoogleMapsApiKey(settingsGoogleMapsApiKey.trim());
+      Alert.alert("Settings Saved", "The map template key has been saved.");
+    } catch (error) {
+      Alert.alert("Settings Error", "Unable to save the map template key.");
+    }
   };
 
   const addSettingsJob = () => {
@@ -1266,6 +1532,16 @@ export default function App() {
     setHazardSignatureStrokes([]);
   };
 
+  const resetAsBuiltForm = () => {
+    setAsBuiltAddress("");
+    setAsBuiltPreparedBy("");
+    setAsBuiltNotes("");
+    setAsBuiltLines([]);
+    setAsBuiltSymbols([]);
+    setCurrentAsBuiltLine(null);
+    asBuiltLineStartRef.current = null;
+  };
+
   const validateForm = () => {
     if (!operator.trim()) {
       Alert.alert("Validation", "Please enter Operator Name.");
@@ -1316,6 +1592,38 @@ export default function App() {
     return attachments;
   };
 
+  const createTextFileAttachment = async ({
+    filename,
+    content,
+    contentType,
+  }) => {
+    const safeFilename = filename.replace(/[^\w.\-]/g, "_");
+    const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+
+    if (!baseDirectory) {
+      throw new Error("Unable to create the plan attachment on this device.");
+    }
+
+    const fileUri = `${baseDirectory}${safeFilename}`;
+
+    await FileSystem.writeAsStringAsync(fileUri, content, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+
+    const base64Content = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    return {
+      attachment: {
+        filename: safeFilename,
+        content: base64Content,
+        contentType,
+      },
+      uri: fileUri,
+    };
+  };
+
   const sendFirebaseReport = async ({
     reportType,
     subject,
@@ -1323,6 +1631,7 @@ export default function App() {
     fields = {},
     photoList = [],
     photoFilenamePrefix = "report-photo",
+    extraAttachments = [],
   }) => {
     const endpoint = FIREBASE_REPORT_ENDPOINT.trim();
 
@@ -1345,7 +1654,7 @@ export default function App() {
         subject,
         message,
         fields,
-        attachments,
+        attachments: [...attachments, ...extraAttachments],
       }),
     });
 
@@ -1460,6 +1769,26 @@ export default function App() {
     };
   };
 
+  const getAsBuiltPoint = (event) => {
+    const { locationX, locationY } = event.nativeEvent;
+    const width = Math.max(asBuiltBoardSize.width, 1);
+    const height = Math.max(asBuiltBoardSize.height, 1);
+
+    if (
+      locationX < 0 ||
+      locationX > width ||
+      locationY < 0 ||
+      locationY > height
+    ) {
+      return null;
+    }
+
+    return {
+      x: (locationX / width) * 100,
+      y: (locationY / height) * 100,
+    };
+  };
+
   const signaturePanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -1518,6 +1847,110 @@ export default function App() {
     [isSubmitting, signaturePadSize]
   );
 
+  const asBuiltPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !isSubmitting,
+        onStartShouldSetPanResponderCapture: () => !isSubmitting,
+        onMoveShouldSetPanResponder: () => !isSubmitting,
+        onMoveShouldSetPanResponderCapture: () => !isSubmitting,
+        onPanResponderGrant: (event) => {
+          const point = getAsBuiltPoint(event);
+
+          if (!point) return;
+
+          if (asBuiltTool !== "line") {
+            setAsBuiltSymbols((currentSymbols) => [
+              ...currentSymbols,
+              {
+                id: `${Date.now()}-${currentSymbols.length}`,
+                type: asBuiltTool,
+                x: point.x,
+                y: point.y,
+                createdAt: Date.now(),
+              },
+            ]);
+            return;
+          }
+
+          setIsDrawingAsBuilt(true);
+          asBuiltLineStartRef.current = point;
+          setCurrentAsBuiltLine({
+            start: point,
+            end: point,
+            color: asBuiltLineColor,
+            width: asBuiltLineWidth,
+            style: asBuiltLineStyle,
+          });
+        },
+        onPanResponderMove: (event) => {
+          if (asBuiltTool !== "line" || !asBuiltLineStartRef.current) return;
+
+          const point = getAsBuiltPoint(event);
+
+          if (!point) return;
+
+          const snappedEnd = snapAsBuiltLineEnd(
+            asBuiltLineStartRef.current,
+            point
+          );
+
+          setCurrentAsBuiltLine({
+            start: asBuiltLineStartRef.current,
+            end: snappedEnd,
+            color: asBuiltLineColor,
+            width: asBuiltLineWidth,
+            style: asBuiltLineStyle,
+          });
+        },
+        onPanResponderRelease: (event) => {
+          const startPoint = asBuiltLineStartRef.current;
+          const point = getAsBuiltPoint(event);
+
+          if (asBuiltTool === "line" && startPoint && point) {
+            const snappedEnd = snapAsBuiltLineEnd(startPoint, point);
+            const distance = Math.hypot(
+              snappedEnd.x - startPoint.x,
+              snappedEnd.y - startPoint.y
+            );
+
+            if (distance > 1.4) {
+              setAsBuiltLines((currentLines) => [
+                ...currentLines,
+                {
+                  id: `${Date.now()}-${currentLines.length}`,
+                  start: startPoint,
+                  end: snappedEnd,
+                  color: asBuiltLineColor,
+                  width: asBuiltLineWidth,
+                  style: asBuiltLineStyle,
+                  createdAt: Date.now(),
+                },
+              ]);
+            }
+          }
+
+          asBuiltLineStartRef.current = null;
+          setCurrentAsBuiltLine(null);
+          setIsDrawingAsBuilt(false);
+        },
+        onPanResponderTerminate: () => {
+          asBuiltLineStartRef.current = null;
+          setCurrentAsBuiltLine(null);
+          setIsDrawingAsBuilt(false);
+        },
+        onShouldBlockNativeResponder: () => true,
+      }),
+    [
+      asBuiltBoardSize,
+      asBuiltLineColor,
+      asBuiltLineStyle,
+      asBuiltLineWidth,
+      asBuiltTool,
+      isSubmitting,
+    ]
+  );
+
   const clearHazardSignature = () => {
     setHazardSignatureStrokes([]);
   };
@@ -1552,6 +1985,152 @@ export default function App() {
     setHazardSignOnName("");
     setHasHazardSignOnConfirmed(false);
     setHazardSignatureStrokes([]);
+  };
+
+  const undoAsBuiltMark = () => {
+    const lastLine = asBuiltLines[asBuiltLines.length - 1];
+    const lastSymbol = asBuiltSymbols[asBuiltSymbols.length - 1];
+
+    if (!lastLine && !lastSymbol) return;
+
+    if (!lastSymbol || (lastLine && lastLine.createdAt > lastSymbol.createdAt)) {
+      setAsBuiltLines((currentLines) => currentLines.slice(0, -1));
+      return;
+    }
+
+    setAsBuiltSymbols((currentSymbols) => currentSymbols.slice(0, -1));
+  };
+
+  const clearAsBuiltDrawing = () => {
+    setAsBuiltLines([]);
+    setAsBuiltSymbols([]);
+    setCurrentAsBuiltLine(null);
+    asBuiltLineStartRef.current = null;
+  };
+
+  const submitAsBuilt = async () => {
+    if (!asBuiltAddress.trim()) {
+      Alert.alert("Validation", "Please enter the site address.");
+      return;
+    }
+
+    if (!asBuiltPreparedBy.trim()) {
+      Alert.alert("Validation", "Please enter who prepared the As-Built.");
+      return;
+    }
+
+    if (asBuiltLines.length === 0 && asBuiltSymbols.length === 0) {
+      Alert.alert(
+        "Validation",
+        "Please draw at least one drain line or add a symbol."
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const asBuiltSvg = buildAsBuiltSvg({
+        address: asBuiltAddress.trim(),
+        preparedBy: asBuiltPreparedBy.trim(),
+        notes: asBuiltNotes.trim(),
+        lines: asBuiltLines,
+        symbols: asBuiltSymbols,
+        mapUrl: asBuiltMapImageUrl,
+      });
+      const planAttachment = await createTextFileAttachment({
+        filename: `as-built-${Date.now()}.svg`,
+        content: asBuiltSvg,
+        contentType: "image/svg+xml",
+      });
+      const subject = `As-Built plan - ${asBuiltAddress.trim()}`;
+      const message = buildFiledEmail({
+        title: "As-Built Plan",
+        reference: asBuiltAddress.trim(),
+        sections: [
+          {
+            title: "Plan Details",
+            rows: [
+              ["Site Address", asBuiltAddress.trim()],
+              ["Prepared By", asBuiltPreparedBy.trim()],
+              ["Drain Lines", String(asBuiltLines.length)],
+              ["Symbols", String(asBuiltSymbols.length)],
+              [
+                "Map Template",
+                asBuiltMapImageUrl
+                  ? "Google map template shown while drawing"
+                  : "No map template used",
+              ],
+            ],
+          },
+          {
+            title: "Drawing Setup",
+            rows: [
+              ["Line Colour", getAsBuiltColorLabel(asBuiltLineColor)],
+              ["Line Width", getAsBuiltWidthLabel(asBuiltLineWidth)],
+              ["Line Style", getAsBuiltStyleLabel(asBuiltLineStyle)],
+            ],
+          },
+          {
+            title: "Notes",
+            rows: [["Notes", asBuiltNotes.trim() || "None"]],
+          },
+        ],
+      });
+
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "As-Built Plan",
+        subject,
+        message,
+        fields: {
+          report_type: "As-Built Plan",
+          template: "as_built",
+          site_address: asBuiltAddress.trim(),
+          prepared_by: asBuiltPreparedBy.trim(),
+          notes: asBuiltNotes.trim() || "None",
+          drain_lines: String(asBuiltLines.length),
+          symbols: String(asBuiltSymbols.length),
+        },
+        extraAttachments: [planAttachment.attachment],
+      });
+
+      if (sentByFirebase) {
+        Alert.alert("Success", "As-Built plan emailed successfully.");
+        resetAsBuiltForm();
+        return;
+      }
+
+      const canCompose = await MailComposer.isAvailableAsync();
+
+      if (!canCompose) {
+        Alert.alert(
+          "Email App Required",
+          "To send an As-Built plan, this device needs an email app set up."
+        );
+        return;
+      }
+
+      const mailResult = await MailComposer.composeAsync({
+        recipients: [activeRecipientEmail],
+        subject,
+        body: message,
+        attachments: [planAttachment.uri],
+      });
+
+      if (mailResult.status === "cancelled") {
+        return;
+      }
+
+      Alert.alert(
+        "Success",
+        "As-Built email opened. Tap send in your email app to finish."
+      );
+      resetAsBuiltForm();
+    } catch (error) {
+      Alert.alert("Email Failed", getEmailErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const submitForm = async () => {
@@ -2230,7 +2809,7 @@ export default function App() {
             <ScrollView
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
-              scrollEnabled={!isDrawingSignature}
+              scrollEnabled={!isDrawingSignature && !isDrawingAsBuilt}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
             >
@@ -2355,6 +2934,31 @@ export default function App() {
                     </Text>
                   </Pressable>
                 </View>
+
+                <Text style={styles.formSectionTitle}>Map Template</Text>
+                <Text style={styles.settingsHelpText}>
+                  Optional: save a Google Maps Static API key to show a map
+                  snapshot under As-Built drawings.
+                </Text>
+                <StableLabeledInput
+                  label="Google Maps Static API Key"
+                  value={settingsGoogleMapsApiKey}
+                  onChangeText={setSettingsGoogleMapsApiKey}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={saveGoogleMapsApiKeySetting}
+                  disabled={isSubmitting}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    SAVE MAP TEMPLATE KEY
+                  </Text>
+                </Pressable>
               </View>
 
               <View style={styles.card}>
@@ -3349,6 +3953,312 @@ export default function App() {
               </Pressable>
             </>
           )}
+
+          {activePage === "asbuilt" && (
+            <>
+              <View style={styles.pageHeader}>
+                <Text style={styles.pageTitle}>As-Built's</Text>
+                <Text style={styles.pageSubtitle}>
+                  Sketch drain runs, fittings, and site notes for filing.
+                </Text>
+              </View>
+
+              <View style={styles.card}>
+                <StableLabeledInput
+                  label="Site Address"
+                  value={asBuiltAddress}
+                  onChangeText={setAsBuiltAddress}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Prepared By"
+                  value={asBuiltPreparedBy}
+                  onChangeText={setAsBuiltPreparedBy}
+                  editable={!isSubmitting}
+                />
+
+                <Text style={styles.formSectionTitle}>Line Colour</Text>
+                <View style={styles.optionGrid}>
+                  {AS_BUILT_LINE_COLORS.map((color) => {
+                    const isSelected = asBuiltLineColor === color.value;
+
+                    return (
+                      <Pressable
+                        key={color.value}
+                        style={[
+                          styles.asBuiltSwatchButton,
+                          isSelected && styles.asBuiltToolSelected,
+                        ]}
+                        onPress={() => setAsBuiltLineColor(color.value)}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <View
+                          style={[
+                            styles.asBuiltSwatch,
+                            { backgroundColor: color.value },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.asBuiltToolText,
+                            isSelected && styles.asBuiltToolTextSelected,
+                          ]}
+                        >
+                          {color.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={styles.formSectionTitle}>Line Type</Text>
+                <View style={styles.optionGrid}>
+                  {AS_BUILT_LINE_WIDTHS.map((width) => {
+                    const isSelected = asBuiltLineWidth === width.value;
+
+                    return (
+                      <Pressable
+                        key={width.value}
+                        style={[
+                          styles.asBuiltToolButton,
+                          isSelected && styles.asBuiltToolSelected,
+                        ]}
+                        onPress={() => setAsBuiltLineWidth(width.value)}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <Text
+                          style={[
+                            styles.asBuiltToolText,
+                            isSelected && styles.asBuiltToolTextSelected,
+                          ]}
+                        >
+                          {width.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+
+                  {AS_BUILT_LINE_STYLES.map((lineStyle) => {
+                    const isSelected = asBuiltLineStyle === lineStyle.value;
+
+                    return (
+                      <Pressable
+                        key={lineStyle.value}
+                        style={[
+                          styles.asBuiltToolButton,
+                          isSelected && styles.asBuiltToolSelected,
+                        ]}
+                        onPress={() => setAsBuiltLineStyle(lineStyle.value)}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <Text
+                          style={[
+                            styles.asBuiltToolText,
+                            isSelected && styles.asBuiltToolTextSelected,
+                          ]}
+                        >
+                          {lineStyle.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={styles.formSectionTitle}>Draw / Symbols</Text>
+                <View style={styles.optionGrid}>
+                  <Pressable
+                    style={[
+                      styles.asBuiltToolButton,
+                      asBuiltTool === "line" && styles.asBuiltToolSelected,
+                    ]}
+                    onPress={() => setAsBuiltTool("line")}
+                    disabled={isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text
+                      style={[
+                        styles.asBuiltToolText,
+                        asBuiltTool === "line" &&
+                          styles.asBuiltToolTextSelected,
+                      ]}
+                    >
+                      Line
+                    </Text>
+                  </Pressable>
+
+                  {AS_BUILT_SYMBOLS.map((symbol) => {
+                    const isSelected = asBuiltTool === symbol.value;
+
+                    return (
+                      <Pressable
+                        key={symbol.value}
+                        style={[
+                          styles.asBuiltToolButton,
+                          isSelected && styles.asBuiltToolSelected,
+                        ]}
+                        onPress={() => setAsBuiltTool(symbol.value)}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <Text
+                          style={[
+                            styles.asBuiltToolText,
+                            isSelected && styles.asBuiltToolTextSelected,
+                          ]}
+                        >
+                          {symbol.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View
+                  style={styles.asBuiltBoard}
+                  onLayout={(event) => {
+                    const { width, height } = event.nativeEvent.layout;
+
+                    setAsBuiltBoardSize({ width, height });
+                  }}
+                  {...asBuiltPanResponder.panHandlers}
+                >
+                  {asBuiltMapImageUrl ? (
+                    <Image
+                      source={{ uri: asBuiltMapImageUrl }}
+                      style={styles.asBuiltMapImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.asBuiltMapPlaceholder}>
+                      <Text style={styles.asBuiltMapPlaceholderText}>
+                        Enter an address and save a Google Maps Static API key
+                        in Settings to show a map template.
+                      </Text>
+                    </View>
+                  )}
+
+                  <Svg
+                    style={styles.asBuiltSvgLayer}
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                  >
+                    {Array.from({ length: 11 }).map((_, index) => (
+                      <Line
+                        key={`grid-v-${index}`}
+                        x1={index * 10}
+                        y1={0}
+                        x2={index * 10}
+                        y2={100}
+                        stroke="rgba(0,0,0,0.18)"
+                        strokeWidth={0.18}
+                      />
+                    ))}
+                    {Array.from({ length: 11 }).map((_, index) => (
+                      <Line
+                        key={`grid-h-${index}`}
+                        x1={0}
+                        y1={index * 10}
+                        x2={100}
+                        y2={index * 10}
+                        stroke="rgba(0,0,0,0.18)"
+                        strokeWidth={0.18}
+                      />
+                    ))}
+
+                    {asBuiltLines.map((line) => (
+                      <Line
+                        key={line.id}
+                        x1={line.start.x}
+                        y1={line.start.y}
+                        x2={line.end.x}
+                        y2={line.end.y}
+                        stroke={line.color}
+                        strokeWidth={getAsBuiltWidth(line.width)}
+                        strokeDasharray={
+                          line.style === "dotted" ? "2 4" : undefined
+                        }
+                        strokeLinecap="round"
+                      />
+                    ))}
+
+                    {currentAsBuiltLine && (
+                      <Line
+                        x1={currentAsBuiltLine.start.x}
+                        y1={currentAsBuiltLine.start.y}
+                        x2={currentAsBuiltLine.end.x}
+                        y2={currentAsBuiltLine.end.y}
+                        stroke={currentAsBuiltLine.color}
+                        strokeWidth={getAsBuiltWidth(currentAsBuiltLine.width)}
+                        strokeDasharray={
+                          currentAsBuiltLine.style === "dotted"
+                            ? "2 4"
+                            : undefined
+                        }
+                        strokeLinecap="round"
+                        opacity={0.72}
+                      />
+                    )}
+
+                    {asBuiltSymbols.map((symbol) => (
+                      <StableAsBuiltSymbol key={symbol.id} symbol={symbol} />
+                    ))}
+                  </Svg>
+                </View>
+
+                <View style={styles.asBuiltBoardActions}>
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={undoAsBuiltMark}
+                    disabled={isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.secondaryButtonText}>UNDO</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={clearAsBuiltDrawing}
+                    disabled={isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.secondaryButtonText}>CLEAR DRAWING</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.inputGap} />
+
+                <DraftTextInput
+                  placeholder="Notes..."
+                  placeholderTextColor="#8a8a8a"
+                  multiline
+                  style={styles.notes}
+                  value={asBuiltNotes}
+                  onChangeText={setAsBuiltNotes}
+                  editable={!isSubmitting}
+                />
+              </View>
+
+              <Pressable
+                style={[
+                  styles.submitButton,
+                  isSubmitting && styles.disabledButton,
+                ]}
+                onPress={submitAsBuilt}
+                disabled={isSubmitting}
+                accessibilityRole="button"
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.submitText}>SUBMIT AS-BUILT</Text>
+                )}
+              </Pressable>
+            </>
+          )}
             </ScrollView>
             {activePage === "menu" && (
               <Pressable
@@ -4108,6 +5018,91 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  asBuiltSwatchButton: {
+    backgroundColor: "#050505",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#1f1f1f",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  asBuiltSwatch: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.26)",
+  },
+
+  asBuiltToolButton: {
+    backgroundColor: "#050505",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: "#1f1f1f",
+  },
+
+  asBuiltToolSelected: {
+    backgroundColor: "#D7FF2F",
+    borderColor: "#D7FF2F",
+  },
+
+  asBuiltToolText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  asBuiltToolTextSelected: {
+    color: "#000",
+  },
+
+  asBuiltBoard: {
+    height: 430,
+    backgroundColor: "#f4f4f4",
+    borderRadius: 18,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(215,255,47,0.38)",
+    marginTop: 4,
+    marginBottom: 14,
+    position: "relative",
+  },
+
+  asBuiltMapImage: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.72,
+  },
+
+  asBuiltMapPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 22,
+    backgroundColor: "#ededed",
+  },
+
+  asBuiltMapPlaceholderText: {
+    color: "#555",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    fontWeight: "700",
+  },
+
+  asBuiltSvgLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  asBuiltBoardActions: {
+    gap: 10,
   },
 
   submitButton: {
