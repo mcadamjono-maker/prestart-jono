@@ -220,6 +220,11 @@ const AS_BUILT_SYMBOLS = [
   { label: "Vent", value: "vent", shortLabel: "V" },
   { label: "MH", value: "manhole", shortLabel: "MH" },
   { label: "CP", value: "cesspit", shortLabel: "CP" },
+  { label: "DP", value: "downpipe", shortLabel: "DP" },
+  { label: "Flow ->", value: "flow_right", shortLabel: "->" },
+  { label: "Flow <-", value: "flow_left", shortLabel: "<-" },
+  { label: "Flow up", value: "flow_up", shortLabel: "^" },
+  { label: "Flow down", value: "flow_down", shortLabel: "v" },
 ];
 
 const DEFAULT_JOB_OPTIONS = [
@@ -540,9 +545,76 @@ const getAsBuiltSymbol = (symbolValue) =>
   AS_BUILT_SYMBOLS.find((symbol) => symbol.value === symbolValue) ||
   AS_BUILT_SYMBOLS[0];
 
+const isAsBuiltFlowSymbol = (symbolType) =>
+  String(symbolType || "").startsWith("flow_");
+
+const getAsBuiltFlowPoints = (symbol) => {
+  const length = 7.2;
+
+  if (symbol.type === "flow_left") {
+    return {
+      start: { x: symbol.x + length / 2, y: symbol.y },
+      end: { x: symbol.x - length / 2, y: symbol.y },
+    };
+  }
+
+  if (symbol.type === "flow_up") {
+    return {
+      start: { x: symbol.x, y: symbol.y + length / 2 },
+      end: { x: symbol.x, y: symbol.y - length / 2 },
+    };
+  }
+
+  if (symbol.type === "flow_down") {
+    return {
+      start: { x: symbol.x, y: symbol.y - length / 2 },
+      end: { x: symbol.x, y: symbol.y + length / 2 },
+    };
+  }
+
+  return {
+    start: { x: symbol.x - length / 2, y: symbol.y },
+    end: { x: symbol.x + length / 2, y: symbol.y },
+  };
+};
+
+const buildSvgPolylineMarkup = ({
+  strokes = [],
+  x = 0,
+  y = 0,
+  width = 20,
+  height = 8,
+  stroke = "#111111",
+  strokeWidth = 0.45,
+}) =>
+  strokes
+    .filter((strokePoints) => strokePoints.length > 1)
+    .map((strokePoints) => {
+      const points = strokePoints
+        .map(
+          (point) =>
+            `${(x + (point.x / 100) * width).toFixed(2)},${(
+              y +
+              (point.y / 100) * height
+            ).toFixed(2)}`
+        )
+        .join(" ");
+
+      return `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+    })
+    .join("\n");
+
 const buildAsBuiltSvg = ({
   address,
-  preparedBy,
+  owner,
+  lotNumber,
+  dpsNumber,
+  buildingConsentNumber,
+  inspectionDate,
+  inspector,
+  drainlayer,
+  drainageLicenseNumber,
+  drainlayerSignatureStrokes,
   notes,
   lines,
   symbols,
@@ -565,6 +637,17 @@ const buildAsBuiltSvg = ({
     .map((symbol) => {
       const symbolConfig = getAsBuiltSymbol(symbol.type);
 
+      if (isAsBuiltFlowSymbol(symbol.type)) {
+        const flow = getAsBuiltFlowPoints(symbol);
+
+        return `
+        <line x1="${flow.start.x.toFixed(2)}" y1="${flow.start.y.toFixed(
+          2
+        )}" x2="${flow.end.x.toFixed(2)}" y2="${flow.end.y.toFixed(
+          2
+        )}" stroke="#111111" stroke-width="1.3" stroke-linecap="round" marker-end="url(#arrowhead)" />`;
+      }
+
       return `
         <circle cx="${symbol.x.toFixed(2)}" cy="${symbol.y.toFixed(
         2
@@ -579,26 +662,43 @@ const buildAsBuiltSvg = ({
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1400" viewBox="0 0 100 118">
+  <defs>
+    <marker id="arrowhead" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
+      <path d="M0,0 L5,2.5 L0,5 Z" fill="#111111" />
+    </marker>
+  </defs>
   <rect width="100" height="118" fill="#ffffff" />
   <text x="4" y="6" font-family="Arial, sans-serif" font-size="4.5" font-weight="700" fill="#111111">Williams Drainage Limited - As-Built Plan</text>
   <text x="4" y="11" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Address: ${escapeXml(
     address || "Not supplied"
   )}</text>
-  <text x="4" y="15" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Prepared by: ${escapeXml(
-    preparedBy || "Not supplied"
+  <text x="4" y="15" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Owner: ${escapeXml(
+    owner || "Not supplied"
+  )} | Lot: ${escapeXml(lotNumber || "Not supplied")} | DPS: ${escapeXml(
+    dpsNumber || "Not supplied"
   )}</text>
   <text x="4" y="19" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Submitted: ${escapeXml(
     getSubmittedAt()
   )}</text>
+  <text x="4" y="23" font-family="Arial, sans-serif" font-size="2.3" fill="#333333">Building Consent: ${escapeXml(
+    buildingConsentNumber || "Not supplied"
+  )} | Inspection Date: ${escapeXml(
+    inspectionDate || "Not supplied"
+  )} | Inspector: ${escapeXml(inspector || "Not supplied")}</text>
+  <text x="4" y="26.5" font-family="Arial, sans-serif" font-size="2.3" fill="#333333">Drainlayer: ${escapeXml(
+    drainlayer || "Not supplied"
+  )} | Drainage License#: ${escapeXml(
+    drainageLicenseNumber || "Not supplied"
+  )}</text>
   ${
     mapUrl
-      ? `<text x="4" y="23" font-family="Arial, sans-serif" font-size="2.2" fill="#555555">Map template used: ${escapeXml(
+      ? `<text x="4" y="30" font-family="Arial, sans-serif" font-size="2" fill="#555555">Map template used: ${escapeXml(
           mapUrl
         )}</text>`
       : ""
   }
-  <rect x="4" y="27" width="92" height="82" fill="#fbfbfb" stroke="#222222" stroke-width="0.7" />
-  <g transform="translate(4 27) scale(0.92 0.82)">
+  <rect x="4" y="32" width="92" height="68" fill="#fbfbfb" stroke="#222222" stroke-width="0.7" />
+  <g transform="translate(4 32) scale(0.92 0.68)">
     <g stroke="#d6d6d6" stroke-width="0.16">
       ${Array.from({ length: 11 })
         .map(
@@ -616,9 +716,18 @@ const buildAsBuiltSvg = ({
     ${lineMarkup}
     ${symbolMarkup}
   </g>
-  <text x="4" y="114" font-family="Arial, sans-serif" font-size="2.4" fill="#333333">Notes: ${escapeXml(
+  <text x="4" y="105" font-family="Arial, sans-serif" font-size="2.4" fill="#333333">Notes: ${escapeXml(
     notes || "None"
   )}</text>
+  <rect x="4" y="108" width="38" height="7" fill="#ffffff" stroke="#222222" stroke-width="0.4" />
+  <text x="4" y="106.9" font-family="Arial, sans-serif" font-size="2.1" fill="#333333">Drainlayer Signature</text>
+  ${buildSvgPolylineMarkup({
+    strokes: drainlayerSignatureStrokes,
+    x: 4,
+    y: 108,
+    width: 38,
+    height: 7,
+  })}
 </svg>`;
 };
 
@@ -717,6 +826,25 @@ const FailCrossIcon = ({ active }) => (
 
 const StableAsBuiltSymbol = ({ symbol }) => {
   const symbolConfig = getAsBuiltSymbol(symbol.type);
+
+  if (isAsBuiltFlowSymbol(symbol.type)) {
+    const flow = getAsBuiltFlowPoints(symbol);
+
+    return (
+      <>
+        <Line
+          x1={flow.start.x}
+          y1={flow.start.y}
+          x2={flow.end.x}
+          y2={flow.end.y}
+          stroke="#111"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+        />
+        <Circle cx={flow.end.x} cy={flow.end.y} r={1.8} fill="#111" />
+      </>
+    );
+  }
 
   return (
     <>
@@ -994,7 +1122,24 @@ export default function App() {
   });
   const [isDrawingSignature, setIsDrawingSignature] = useState(false);
   const [asBuiltAddress, setAsBuiltAddress] = useState("");
-  const [asBuiltPreparedBy, setAsBuiltPreparedBy] = useState("");
+  const [asBuiltOwner, setAsBuiltOwner] = useState("");
+  const [asBuiltLotNumber, setAsBuiltLotNumber] = useState("");
+  const [asBuiltDpsNumber, setAsBuiltDpsNumber] = useState("");
+  const [asBuiltBuildingConsentNumber, setAsBuiltBuildingConsentNumber] =
+    useState("");
+  const [asBuiltInspectionDate, setAsBuiltInspectionDate] = useState("");
+  const [asBuiltInspector, setAsBuiltInspector] = useState("");
+  const [asBuiltDrainlayer, setAsBuiltDrainlayer] = useState("");
+  const [asBuiltDrainageLicenseNumber, setAsBuiltDrainageLicenseNumber] =
+    useState("");
+  const [asBuiltDrainlayerSignatureStrokes, setAsBuiltDrainlayerSignatureStrokes] =
+    useState([]);
+  const [asBuiltSignaturePadSize, setAsBuiltSignaturePadSize] = useState({
+    width: 1,
+    height: 1,
+  });
+  const [isDrawingAsBuiltSignature, setIsDrawingAsBuiltSignature] =
+    useState(false);
   const [asBuiltNotes, setAsBuiltNotes] = useState("");
   const [asBuiltLineColor, setAsBuiltLineColor] = useState(
     AS_BUILT_LINE_COLORS[0].value
@@ -1534,7 +1679,15 @@ export default function App() {
 
   const resetAsBuiltForm = () => {
     setAsBuiltAddress("");
-    setAsBuiltPreparedBy("");
+    setAsBuiltOwner("");
+    setAsBuiltLotNumber("");
+    setAsBuiltDpsNumber("");
+    setAsBuiltBuildingConsentNumber("");
+    setAsBuiltInspectionDate("");
+    setAsBuiltInspector("");
+    setAsBuiltDrainlayer("");
+    setAsBuiltDrainageLicenseNumber("");
+    setAsBuiltDrainlayerSignatureStrokes([]);
     setAsBuiltNotes("");
     setAsBuiltLines([]);
     setAsBuiltSymbols([]);
@@ -1789,6 +1942,26 @@ export default function App() {
     };
   };
 
+  const getAsBuiltSignaturePoint = (event) => {
+    const { locationX, locationY } = event.nativeEvent;
+    const width = Math.max(asBuiltSignaturePadSize.width, 1);
+    const height = Math.max(asBuiltSignaturePadSize.height, 1);
+
+    if (
+      locationX < 0 ||
+      locationX > width ||
+      locationY < 0 ||
+      locationY > height
+    ) {
+      return null;
+    }
+
+    return {
+      x: (locationX / width) * 100,
+      y: (locationY / height) * 100,
+    };
+  };
+
   const signaturePanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -1951,8 +2124,70 @@ export default function App() {
     ]
   );
 
+  const asBuiltSignaturePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !isSubmitting,
+        onStartShouldSetPanResponderCapture: () => !isSubmitting,
+        onMoveShouldSetPanResponder: () => !isSubmitting,
+        onMoveShouldSetPanResponderCapture: () => !isSubmitting,
+        onPanResponderGrant: (event) => {
+          const point = getAsBuiltSignaturePoint(event);
+
+          if (!point) return;
+
+          setIsDrawingAsBuiltSignature(true);
+
+          setAsBuiltDrainlayerSignatureStrokes((currentStrokes) => [
+            ...currentStrokes,
+            [point],
+          ]);
+        },
+        onPanResponderMove: (event) => {
+          const point = getAsBuiltSignaturePoint(event);
+
+          if (!point) return;
+
+          setAsBuiltDrainlayerSignatureStrokes((currentStrokes) => {
+            if (currentStrokes.length === 0) {
+              return [[point]];
+            }
+
+            const nextStrokes = [...currentStrokes];
+            const lastStroke = nextStrokes[nextStrokes.length - 1];
+            const lastPoint = lastStroke[lastStroke.length - 1] || point;
+
+            if (
+              Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) > 22
+            ) {
+              return [...currentStrokes, [point]];
+            }
+
+            nextStrokes[nextStrokes.length - 1] = [
+              ...lastStroke,
+              point,
+            ];
+
+            return nextStrokes;
+          });
+        },
+        onPanResponderRelease: () => {
+          setIsDrawingAsBuiltSignature(false);
+        },
+        onPanResponderTerminate: () => {
+          setIsDrawingAsBuiltSignature(false);
+        },
+        onShouldBlockNativeResponder: () => true,
+      }),
+    [asBuiltSignaturePadSize, isSubmitting]
+  );
+
   const clearHazardSignature = () => {
     setHazardSignatureStrokes([]);
+  };
+
+  const clearAsBuiltSignature = () => {
+    setAsBuiltDrainlayerSignatureStrokes([]);
   };
 
   const confirmHazardSignOn = () => {
@@ -2014,8 +2249,13 @@ export default function App() {
       return;
     }
 
-    if (!asBuiltPreparedBy.trim()) {
-      Alert.alert("Validation", "Please enter who prepared the As-Built.");
+    if (!asBuiltDrainlayer.trim()) {
+      Alert.alert("Validation", "Please enter the drainlayer.");
+      return;
+    }
+
+    if (getSignaturePointCount(asBuiltDrainlayerSignatureStrokes) < 3) {
+      Alert.alert("Validation", "Please add the drainlayer signature.");
       return;
     }
 
@@ -2032,7 +2272,15 @@ export default function App() {
     try {
       const asBuiltSvg = buildAsBuiltSvg({
         address: asBuiltAddress.trim(),
-        preparedBy: asBuiltPreparedBy.trim(),
+        owner: asBuiltOwner.trim(),
+        lotNumber: asBuiltLotNumber.trim(),
+        dpsNumber: asBuiltDpsNumber.trim(),
+        buildingConsentNumber: asBuiltBuildingConsentNumber.trim(),
+        inspectionDate: asBuiltInspectionDate.trim(),
+        inspector: asBuiltInspector.trim(),
+        drainlayer: asBuiltDrainlayer.trim(),
+        drainageLicenseNumber: asBuiltDrainageLicenseNumber.trim(),
+        drainlayerSignatureStrokes: asBuiltDrainlayerSignatureStrokes,
         notes: asBuiltNotes.trim(),
         lines: asBuiltLines,
         symbols: asBuiltSymbols,
@@ -2051,8 +2299,16 @@ export default function App() {
           {
             title: "Plan Details",
             rows: [
-              ["Site Address", asBuiltAddress.trim()],
-              ["Prepared By", asBuiltPreparedBy.trim()],
+              ["Address", asBuiltAddress.trim()],
+              ["Owner", asBuiltOwner.trim()],
+              ["Lot#", asBuiltLotNumber.trim()],
+              ["DPS#", asBuiltDpsNumber.trim()],
+              ["Building Consent#", asBuiltBuildingConsentNumber.trim()],
+              ["Inspection Date", asBuiltInspectionDate.trim()],
+              ["Inspector", asBuiltInspector.trim()],
+              ["Drainlayer", asBuiltDrainlayer.trim()],
+              ["Drainage License#", asBuiltDrainageLicenseNumber.trim()],
+              ["Drainlayer Signature", "Signature captured"],
               ["Drain Lines", String(asBuiltLines.length)],
               ["Symbols", String(asBuiltSymbols.length)],
               [
@@ -2085,8 +2341,18 @@ export default function App() {
         fields: {
           report_type: "As-Built Plan",
           template: "as_built",
-          site_address: asBuiltAddress.trim(),
-          prepared_by: asBuiltPreparedBy.trim(),
+          address: asBuiltAddress.trim(),
+          owner: asBuiltOwner.trim() || "Not supplied",
+          lot_number: asBuiltLotNumber.trim() || "Not supplied",
+          dps_number: asBuiltDpsNumber.trim() || "Not supplied",
+          building_consent_number:
+            asBuiltBuildingConsentNumber.trim() || "Not supplied",
+          inspection_date: asBuiltInspectionDate.trim() || "Not supplied",
+          inspector: asBuiltInspector.trim() || "Not supplied",
+          drainlayer: asBuiltDrainlayer.trim(),
+          drainage_license_number:
+            asBuiltDrainageLicenseNumber.trim() || "Not supplied",
+          drainlayer_signature: "Signature captured",
           notes: asBuiltNotes.trim() || "None",
           drain_lines: String(asBuiltLines.length),
           symbols: String(asBuiltSymbols.length),
@@ -2809,7 +3075,11 @@ export default function App() {
             <ScrollView
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
-              scrollEnabled={!isDrawingSignature && !isDrawingAsBuilt}
+              scrollEnabled={
+                !isDrawingSignature &&
+                !isDrawingAsBuilt &&
+                !isDrawingAsBuiltSignature
+              }
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
             >
@@ -3965,16 +4235,65 @@ export default function App() {
 
               <View style={styles.card}>
                 <StableLabeledInput
-                  label="Site Address"
+                  label="Address"
                   value={asBuiltAddress}
                   onChangeText={setAsBuiltAddress}
                   editable={!isSubmitting}
                 />
 
                 <StableLabeledInput
-                  label="Prepared By"
-                  value={asBuiltPreparedBy}
-                  onChangeText={setAsBuiltPreparedBy}
+                  label="Owner"
+                  value={asBuiltOwner}
+                  onChangeText={setAsBuiltOwner}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Lot#"
+                  value={asBuiltLotNumber}
+                  onChangeText={setAsBuiltLotNumber}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="DPS#"
+                  value={asBuiltDpsNumber}
+                  onChangeText={setAsBuiltDpsNumber}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Building Consent#"
+                  value={asBuiltBuildingConsentNumber}
+                  onChangeText={setAsBuiltBuildingConsentNumber}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Inspection Date"
+                  value={asBuiltInspectionDate}
+                  onChangeText={setAsBuiltInspectionDate}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Inspector"
+                  value={asBuiltInspector}
+                  onChangeText={setAsBuiltInspector}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Drainlayer"
+                  value={asBuiltDrainlayer}
+                  onChangeText={setAsBuiltDrainlayer}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Drainage License#"
+                  value={asBuiltDrainageLicenseNumber}
+                  onChangeText={setAsBuiltDrainageLicenseNumber}
                   editable={!isSubmitting}
                 />
 
@@ -4228,6 +4547,34 @@ export default function App() {
                     <Text style={styles.secondaryButtonText}>CLEAR DRAWING</Text>
                   </Pressable>
                 </View>
+
+                <View style={styles.inputGap} />
+
+                <Text style={styles.inputLabel}>Drainlayer Signature</Text>
+                <View
+                  style={styles.signaturePad}
+                  onLayout={(event) => {
+                    const { width, height } = event.nativeEvent.layout;
+
+                    setAsBuiltSignaturePadSize({ width, height });
+                  }}
+                  {...asBuiltSignaturePanResponder.panHandlers}
+                >
+                  <StableSignatureInk
+                    strokes={asBuiltDrainlayerSignatureStrokes}
+                  />
+                </View>
+
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={clearAsBuiltSignature}
+                  disabled={isSubmitting}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    CLEAR SIGNATURE
+                  </Text>
+                </Pressable>
 
                 <View style={styles.inputGap} />
 
