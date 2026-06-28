@@ -32,6 +32,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as MailComposer from "expo-mail-composer";
+import * as Print from "expo-print";
 
 const CHECKLIST_TEMPLATES = {
   digger: [
@@ -510,6 +511,92 @@ const snapAsBuiltLineEnd = (startPoint, endPoint) => {
   });
 };
 
+const getDistanceToAsBuiltSegment = (point, segmentStart, segmentEnd) => {
+  const deltaX = segmentEnd.x - segmentStart.x;
+  const deltaY = segmentEnd.y - segmentStart.y;
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+  if (lengthSquared === 0) {
+    return Math.hypot(point.x - segmentStart.x, point.y - segmentStart.y);
+  }
+
+  const amount = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point.x - segmentStart.x) * deltaX +
+        (point.y - segmentStart.y) * deltaY) /
+        lengthSquared
+    )
+  );
+  const projectedPoint = {
+    x: segmentStart.x + amount * deltaX,
+    y: segmentStart.y + amount * deltaY,
+  };
+
+  return Math.hypot(point.x - projectedPoint.x, point.y - projectedPoint.y);
+};
+
+const simplifyAsBuiltRoughPoints = (points, tolerance = 2.6) => {
+  if (points.length <= 2) return points;
+
+  let furthestIndex = 0;
+  let furthestDistance = 0;
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const distance = getDistanceToAsBuiltSegment(
+      points[index],
+      firstPoint,
+      lastPoint
+    );
+
+    if (distance > furthestDistance) {
+      furthestDistance = distance;
+      furthestIndex = index;
+    }
+  }
+
+  if (furthestDistance <= tolerance) {
+    return [firstPoint, lastPoint];
+  }
+
+  const beforeCorner = simplifyAsBuiltRoughPoints(
+    points.slice(0, furthestIndex + 1),
+    tolerance
+  );
+  const afterCorner = simplifyAsBuiltRoughPoints(
+    points.slice(furthestIndex),
+    tolerance
+  );
+
+  return [...beforeCorner.slice(0, -1), ...afterCorner];
+};
+
+const createSnappedAsBuiltSegments = (points) => {
+  const simplifiedPoints = simplifyAsBuiltRoughPoints(
+    points.map(clampAsBuiltPoint)
+  );
+  const segments = [];
+  let startPoint = simplifiedPoints[0];
+
+  simplifiedPoints.slice(1).forEach((point) => {
+    const snappedEnd = snapAsBuiltLineEnd(startPoint, point);
+    const distance = Math.hypot(
+      snappedEnd.x - startPoint.x,
+      snappedEnd.y - startPoint.y
+    );
+
+    if (distance > 1.4) {
+      segments.push({ start: startPoint, end: snappedEnd });
+      startPoint = snappedEnd;
+    }
+  });
+
+  return segments;
+};
+
 const createAsBuiltMapUrl = (address, endpoint) => {
   const cleanedAddress = String(address || "").trim();
   const cleanedEndpoint = String(endpoint || "").trim();
@@ -536,6 +623,11 @@ const getAsBuiltWidth = (widthValue) =>
 const getAsBuiltStyleLabel = (styleValue) =>
   AS_BUILT_LINE_STYLES.find((style) => style.value === styleValue)?.label ||
   "Solid";
+
+const getAsBuiltRoughPoints = (line) => line?.roughPoints || [];
+
+const formatAsBuiltRoughPoints = (points) =>
+  points.map((point) => `${point.x},${point.y}`).join(" ");
 
 const getAsBuiltSymbol = (symbolValue) =>
   AS_BUILT_SYMBOLS.find((symbol) => symbol.value === symbolValue) ||
@@ -615,6 +707,8 @@ const buildAsBuiltSvg = ({
   lines,
   symbols,
   mapUrl,
+  mapScale,
+  mapOffset,
 }) => {
   const lineMarkup = lines
     .map((line) => {
@@ -693,6 +787,15 @@ const buildAsBuiltSvg = ({
         )}</text>`
       : ""
   }
+  ${
+    mapUrl
+      ? `<text x="4" y="31.8" font-family="Arial, sans-serif" font-size="1.8" fill="#555555">Map crop: ${escapeXml(
+          `${Number(mapScale || 1).toFixed(1)}x zoom, offset ${Math.round(
+            mapOffset?.x || 0
+          )}/${Math.round(mapOffset?.y || 0)}`
+        )}</text>`
+      : ""
+  }
   <rect x="4" y="32" width="92" height="68" fill="#fbfbfb" stroke="#222222" stroke-width="0.7" />
   <g transform="translate(4 32) scale(0.92 0.68)">
     <g stroke="#d6d6d6" stroke-width="0.16">
@@ -725,6 +828,225 @@ const buildAsBuiltSvg = ({
     height: 7,
   })}
 </svg>`;
+};
+
+const buildAsBuiltPlanOnlySvg = ({ lines, symbols }) => {
+  const lineMarkup = lines
+    .map((line) => {
+      const strokeWidth = getAsBuiltWidth(line.width);
+      const dashMarkup =
+        line.style === "dotted" ? ' stroke-dasharray="1.8 3.2"' : "";
+
+      return `<line x1="${line.start.x.toFixed(2)}" y1="${line.start.y.toFixed(
+        2
+      )}" x2="${line.end.x.toFixed(2)}" y2="${line.end.y.toFixed(
+        2
+      )}" stroke="${escapeXml(line.color)}" stroke-width="${strokeWidth}"${dashMarkup} stroke-linecap="round" />`;
+    })
+    .join("\n");
+  const symbolMarkup = symbols
+    .map((symbol) => {
+      const symbolConfig = getAsBuiltSymbol(symbol.type);
+
+      if (isAsBuiltFlowSymbol(symbol.type)) {
+        const flow = getAsBuiltFlowPoints(symbol);
+
+        return `
+        <line x1="${flow.start.x.toFixed(2)}" y1="${flow.start.y.toFixed(
+          2
+        )}" x2="${flow.end.x.toFixed(2)}" y2="${flow.end.y.toFixed(
+          2
+        )}" stroke="#111111" stroke-width="1.3" stroke-linecap="round" marker-end="url(#arrowhead)" />`;
+      }
+
+      return `
+        <circle cx="${symbol.x.toFixed(2)}" cy="${symbol.y.toFixed(
+        2
+      )}" r="3.6" fill="#ffffff" stroke="#111111" stroke-width="0.9" />
+        <text x="${symbol.x.toFixed(2)}" y="${(symbol.y + 1.25).toFixed(
+        2
+      )}" text-anchor="middle" font-family="Arial, sans-serif" font-size="2.7" font-weight="700" fill="#111111">${escapeXml(
+        symbolConfig.shortLabel
+      )}</text>`;
+    })
+    .join("\n");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+    <defs>
+      <marker id="arrowhead" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
+        <path d="M0,0 L5,2.5 L0,5 Z" fill="#111111" />
+      </marker>
+    </defs>
+    <rect width="100" height="100" fill="rgba(255,255,255,0.54)" />
+    <g stroke="#d6d6d6" stroke-width="0.16">
+      ${Array.from({ length: 11 })
+        .map(
+          (_, index) =>
+            `<line x1="${index * 10}" y1="0" x2="${index * 10}" y2="100" />`
+        )
+        .join("\n")}
+      ${Array.from({ length: 11 })
+        .map(
+          (_, index) =>
+            `<line x1="0" y1="${index * 10}" x2="100" y2="${index * 10}" />`
+        )
+        .join("\n")}
+    </g>
+    ${lineMarkup}
+    ${symbolMarkup}
+  </svg>`;
+};
+
+const buildAsBuiltPdfHtml = ({
+  fieldRows,
+  planSvg,
+  mapImageBase64,
+  mapScale,
+  mapOffset,
+  boardSize,
+}) => {
+  const planWidth = 780;
+  const planHeight = 405;
+  const boardWidth = Math.max(boardSize?.width || 1, 1);
+  const boardHeight = Math.max(boardSize?.height || 1, 1);
+  const mapTranslateX = ((mapOffset?.x || 0) / boardWidth) * planWidth;
+  const mapTranslateY = ((mapOffset?.y || 0) / boardHeight) * planHeight;
+  const fieldMarkup = fieldRows
+    .map(
+      ([label, value]) => `
+        <div class="field">
+          <span>${escapeXml(label)}</span>
+          <strong>${escapeXml(value || "Not supplied")}</strong>
+        </div>`
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      @page {
+        size: A4 landscape;
+        margin: 18px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        color: #111111;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      .page {
+        width: 100%;
+        height: 100%;
+      }
+
+      .header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        border-bottom: 2px solid #111111;
+        padding-bottom: 6px;
+        margin-bottom: 7px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.1;
+      }
+
+      .submitted {
+        font-size: 9px;
+        color: #444444;
+      }
+
+      .fields {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 5px 9px;
+        margin-bottom: 8px;
+      }
+
+      .field {
+        min-height: 25px;
+        border: 1px solid #d2d2d2;
+        padding: 4px 6px;
+      }
+
+      .field span {
+        display: block;
+        color: #555555;
+        font-size: 7.5px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+      }
+
+      .field strong {
+        display: block;
+        margin-top: 2px;
+        color: #111111;
+        font-size: 10px;
+        line-height: 1.2;
+        font-weight: 700;
+      }
+
+      .plan {
+        position: relative;
+        width: ${planWidth}px;
+        height: ${planHeight}px;
+        overflow: hidden;
+        border: 2px solid #111111;
+        background: #f7f7f7;
+      }
+
+      .map {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.72;
+        transform: translate(${mapTranslateX.toFixed(2)}px, ${mapTranslateY.toFixed(
+    2
+  )}px) scale(${Number(mapScale || 1).toFixed(2)});
+        transform-origin: center center;
+      }
+
+      .plan svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <h1>Williams Drainage Limited - As-Built Plan</h1>
+        <div class="submitted">Submitted: ${escapeXml(getSubmittedAt())}</div>
+      </div>
+      <div class="fields">${fieldMarkup}</div>
+      <div class="plan">
+        ${
+          mapImageBase64
+            ? `<img class="map" src="data:image/png;base64,${mapImageBase64}" />`
+            : ""
+        }
+        ${planSvg}
+      </div>
+    </div>
+  </body>
+</html>`;
 };
 
 const DraftTextInput = ({
@@ -1150,6 +1472,8 @@ export default function App() {
   const [asBuiltLines, setAsBuiltLines] = useState([]);
   const [asBuiltSymbols, setAsBuiltSymbols] = useState([]);
   const [currentAsBuiltLine, setCurrentAsBuiltLine] = useState(null);
+  const [asBuiltMapScale, setAsBuiltMapScale] = useState(1);
+  const [asBuiltMapOffset, setAsBuiltMapOffset] = useState({ x: 0, y: 0 });
   const [asBuiltBoardSize, setAsBuiltBoardSize] = useState({
     width: 1,
     height: 1,
@@ -1157,6 +1481,7 @@ export default function App() {
   const [isDrawingAsBuilt, setIsDrawingAsBuilt] = useState(false);
   const [hasLoadedJobs, setHasLoadedJobs] = useState(false);
   const asBuiltLineStartRef = useRef(null);
+  const currentAsBuiltLineRef = useRef(null);
 
   const checklist = CHECKLIST_TEMPLATES[selectedTemplate];
   const machineFieldLabel =
@@ -1669,7 +1994,10 @@ export default function App() {
     setAsBuiltLines([]);
     setAsBuiltSymbols([]);
     setCurrentAsBuiltLine(null);
+    setAsBuiltMapScale(1);
+    setAsBuiltMapOffset({ x: 0, y: 0 });
     asBuiltLineStartRef.current = null;
+    currentAsBuiltLineRef.current = null;
   };
 
   const validateForm = () => {
@@ -1752,6 +2080,64 @@ export default function App() {
       },
       uri: fileUri,
     };
+  };
+
+  const createPdfAttachment = async ({ filename, html }) => {
+    const safeFilename = filename.replace(/[^\w.\-]/g, "_");
+    const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+
+    if (!baseDirectory) {
+      throw new Error("Unable to create the plan attachment on this device.");
+    }
+
+    const printedFile = await Print.printToFileAsync({
+      html,
+      width: 842,
+      height: 595,
+      base64: true,
+    });
+    const fileUri = `${baseDirectory}${safeFilename}`;
+
+    await FileSystem.copyAsync({
+      from: printedFile.uri,
+      to: fileUri,
+    });
+
+    const base64Content =
+      printedFile.base64 ||
+      (await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      }));
+
+    return {
+      attachment: {
+        filename: safeFilename,
+        content: base64Content,
+        contentType: "application/pdf",
+      },
+      uri: fileUri,
+    };
+  };
+
+  const getMapImageBase64 = async (imageUrl) => {
+    if (!imageUrl) return "";
+
+    const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+
+    if (!baseDirectory) return "";
+
+    try {
+      const downloadedMap = await FileSystem.downloadAsync(
+        imageUrl,
+        `${baseDirectory}as-built-map-${Date.now()}.png`
+      );
+
+      return await FileSystem.readAsStringAsync(downloadedMap.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } catch {
+      return "";
+    }
   };
 
   const sendFirebaseReport = async ({
@@ -2025,13 +2411,17 @@ export default function App() {
 
           setIsDrawingAsBuilt(true);
           asBuiltLineStartRef.current = point;
-          setCurrentAsBuiltLine({
+          const nextLine = {
             start: point,
             end: point,
+            roughPoints: [point],
             color: asBuiltLineColor,
             width: asBuiltLineWidth,
             style: asBuiltLineStyle,
-          });
+          };
+
+          currentAsBuiltLineRef.current = nextLine;
+          setCurrentAsBuiltLine(nextLine);
         },
         onPanResponderMove: (event) => {
           if (asBuiltTool !== "line" || !asBuiltLineStartRef.current) return;
@@ -2040,17 +2430,36 @@ export default function App() {
 
           if (!point) return;
 
-          const snappedEnd = snapAsBuiltLineEnd(
-            asBuiltLineStartRef.current,
-            point
-          );
+          setCurrentAsBuiltLine((currentLine) => {
+            const previousPoints = currentLine?.roughPoints || [
+              asBuiltLineStartRef.current,
+            ];
+            const lastPoint =
+              previousPoints[previousPoints.length - 1] ||
+              asBuiltLineStartRef.current;
 
-          setCurrentAsBuiltLine({
-            start: asBuiltLineStartRef.current,
-            end: snappedEnd,
-            color: asBuiltLineColor,
-            width: asBuiltLineWidth,
-            style: asBuiltLineStyle,
+            if (Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) < 0.6) {
+              const nextLine = {
+                ...(currentLine || {}),
+                start: asBuiltLineStartRef.current,
+                end: point,
+              };
+
+              currentAsBuiltLineRef.current = nextLine;
+              return nextLine;
+            }
+
+            const nextLine = {
+              start: asBuiltLineStartRef.current,
+              end: point,
+              roughPoints: [...previousPoints, point],
+              color: asBuiltLineColor,
+              width: asBuiltLineWidth,
+              style: asBuiltLineStyle,
+            };
+
+            currentAsBuiltLineRef.current = nextLine;
+            return nextLine;
           });
         },
         onPanResponderRelease: (event) => {
@@ -2058,34 +2467,42 @@ export default function App() {
           const point = getAsBuiltPoint(event);
 
           if (asBuiltTool === "line" && startPoint && point) {
-            const snappedEnd = snapAsBuiltLineEnd(startPoint, point);
-            const distance = Math.hypot(
-              snappedEnd.x - startPoint.x,
-              snappedEnd.y - startPoint.y
-            );
+            const roughPoints = [
+              ...(currentAsBuiltLineRef.current?.roughPoints || [startPoint]),
+              point,
+            ];
+            const snappedSegments = createSnappedAsBuiltSegments(roughPoints);
 
-            if (distance > 1.4) {
-              setAsBuiltLines((currentLines) => [
-                ...currentLines,
-                {
-                  id: `${Date.now()}-${currentLines.length}`,
-                  start: startPoint,
-                  end: snappedEnd,
-                  color: asBuiltLineColor,
-                  width: asBuiltLineWidth,
-                  style: asBuiltLineStyle,
-                  createdAt: Date.now(),
-                },
-              ]);
+            if (snappedSegments.length > 0) {
+              setAsBuiltLines((currentLines) => {
+                const createdAt = Date.now();
+                const groupId = `${createdAt}-${currentLines.length}`;
+
+                return [
+                  ...currentLines,
+                  ...snappedSegments.map((segment, segmentIndex) => ({
+                    id: `${groupId}-${segmentIndex}`,
+                    groupId,
+                    start: segment.start,
+                    end: segment.end,
+                    color: asBuiltLineColor,
+                    width: asBuiltLineWidth,
+                    style: asBuiltLineStyle,
+                    createdAt,
+                  })),
+                ];
+              });
             }
           }
 
           asBuiltLineStartRef.current = null;
+          currentAsBuiltLineRef.current = null;
           setCurrentAsBuiltLine(null);
           setIsDrawingAsBuilt(false);
         },
         onPanResponderTerminate: () => {
           asBuiltLineStartRef.current = null;
+          currentAsBuiltLineRef.current = null;
           setCurrentAsBuiltLine(null);
           setIsDrawingAsBuilt(false);
         },
@@ -2206,7 +2623,13 @@ export default function App() {
     if (!lastLine && !lastSymbol) return;
 
     if (!lastSymbol || (lastLine && lastLine.createdAt > lastSymbol.createdAt)) {
-      setAsBuiltLines((currentLines) => currentLines.slice(0, -1));
+      setAsBuiltLines((currentLines) => {
+        if (!lastLine.groupId) {
+          return currentLines.slice(0, -1);
+        }
+
+        return currentLines.filter((line) => line.groupId !== lastLine.groupId);
+      });
       return;
     }
 
@@ -2218,6 +2641,25 @@ export default function App() {
     setAsBuiltSymbols([]);
     setCurrentAsBuiltLine(null);
     asBuiltLineStartRef.current = null;
+    currentAsBuiltLineRef.current = null;
+  };
+
+  const adjustAsBuiltMapZoom = (amount) => {
+    setAsBuiltMapScale((currentScale) =>
+      Math.max(1, Math.min(3, Number((currentScale + amount).toFixed(2))))
+    );
+  };
+
+  const nudgeAsBuiltMap = (x, y) => {
+    setAsBuiltMapOffset((currentOffset) => ({
+      x: currentOffset.x + x,
+      y: currentOffset.y + y,
+    }));
+  };
+
+  const resetAsBuiltMapCrop = () => {
+    setAsBuiltMapScale(1);
+    setAsBuiltMapOffset({ x: 0, y: 0 });
   };
 
   const submitAsBuilt = async () => {
@@ -2247,26 +2689,34 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      const asBuiltSvg = buildAsBuiltSvg({
-        address: asBuiltAddress.trim(),
-        owner: asBuiltOwner.trim(),
-        lotNumber: asBuiltLotNumber.trim(),
-        dpsNumber: asBuiltDpsNumber.trim(),
-        buildingConsentNumber: asBuiltBuildingConsentNumber.trim(),
-        inspectionDate: asBuiltInspectionDate.trim(),
-        inspector: asBuiltInspector.trim(),
-        drainlayer: asBuiltDrainlayer.trim(),
-        drainageLicenseNumber: asBuiltDrainageLicenseNumber.trim(),
-        drainlayerSignatureStrokes: asBuiltDrainlayerSignatureStrokes,
-        notes: asBuiltNotes.trim(),
+      const asBuiltFieldRows = [
+        ["Address", asBuiltAddress.trim()],
+        ["Owner", asBuiltOwner.trim()],
+        ["Lot#", asBuiltLotNumber.trim()],
+        ["DPS#", asBuiltDpsNumber.trim()],
+        ["Building Consent#", asBuiltBuildingConsentNumber.trim()],
+        ["Inspection Date", asBuiltInspectionDate.trim()],
+        ["Inspector", asBuiltInspector.trim()],
+        ["Drainlayer", asBuiltDrainlayer.trim()],
+        ["Drainage License#", asBuiltDrainageLicenseNumber.trim()],
+        ["Drainlayer Signature", "Signature captured"],
+        ["Notes", asBuiltNotes.trim() || "None"],
+      ];
+      const planSvg = buildAsBuiltPlanOnlySvg({
         lines: asBuiltLines,
         symbols: asBuiltSymbols,
-        mapUrl: asBuiltMapImageUrl,
       });
-      const planAttachment = await createTextFileAttachment({
-        filename: `as-built-${Date.now()}.svg`,
-        content: asBuiltSvg,
-        contentType: "image/svg+xml",
+      const mapImageBase64 = await getMapImageBase64(asBuiltMapImageUrl);
+      const planAttachment = await createPdfAttachment({
+        filename: `as-built-${Date.now()}.pdf`,
+        html: buildAsBuiltPdfHtml({
+          fieldRows: asBuiltFieldRows,
+          planSvg,
+          mapImageBase64,
+          mapScale: asBuiltMapScale,
+          mapOffset: asBuiltMapOffset,
+          boardSize: asBuiltBoardSize,
+        }),
       });
       const subject = `As-Built plan - ${asBuiltAddress.trim()}`;
       const message = buildFiledEmail({
@@ -2275,38 +2725,7 @@ export default function App() {
         sections: [
           {
             title: "Plan Details",
-            rows: [
-              ["Address", asBuiltAddress.trim()],
-              ["Owner", asBuiltOwner.trim()],
-              ["Lot#", asBuiltLotNumber.trim()],
-              ["DPS#", asBuiltDpsNumber.trim()],
-              ["Building Consent#", asBuiltBuildingConsentNumber.trim()],
-              ["Inspection Date", asBuiltInspectionDate.trim()],
-              ["Inspector", asBuiltInspector.trim()],
-              ["Drainlayer", asBuiltDrainlayer.trim()],
-              ["Drainage License#", asBuiltDrainageLicenseNumber.trim()],
-              ["Drainlayer Signature", "Signature captured"],
-              ["Drain Lines", String(asBuiltLines.length)],
-              ["Symbols", String(asBuiltSymbols.length)],
-              [
-                "Map Template",
-                asBuiltMapImageUrl
-                  ? "Google map template shown while drawing"
-                  : "No map template used",
-              ],
-            ],
-          },
-          {
-            title: "Drawing Setup",
-            rows: [
-              ["Line Colour", getAsBuiltColorLabel(asBuiltLineColor)],
-              ["Line Width", getAsBuiltWidthLabel(asBuiltLineWidth)],
-              ["Line Style", getAsBuiltStyleLabel(asBuiltLineStyle)],
-            ],
-          },
-          {
-            title: "Notes",
-            rows: [["Notes", asBuiltNotes.trim() || "None"]],
+            rows: asBuiltFieldRows,
           },
         ],
       });
@@ -2331,8 +2750,6 @@ export default function App() {
             asBuiltDrainageLicenseNumber.trim() || "Not supplied",
           drainlayer_signature: "Signature captured",
           notes: asBuiltNotes.trim() || "None",
-          drain_lines: String(asBuiltLines.length),
-          symbols: String(asBuiltSymbols.length),
         },
         extraAttachments: [planAttachment.attachment],
       });
@@ -4394,6 +4811,104 @@ export default function App() {
                   })}
                 </View>
 
+                <Text style={styles.formSectionTitle}>Map Crop</Text>
+                <View style={styles.asBuiltMapControls}>
+                  <Pressable
+                    style={[
+                      styles.asBuiltMapControlButton,
+                      (!asBuiltMapImageUrl || isSubmitting) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={() => adjustAsBuiltMapZoom(-0.2)}
+                    disabled={!asBuiltMapImageUrl || isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.asBuiltMapControlText}>-</Text>
+                  </Pressable>
+
+                  <Text style={styles.asBuiltMapZoomText}>
+                    {asBuiltMapScale.toFixed(1)}x
+                  </Text>
+
+                  <Pressable
+                    style={[
+                      styles.asBuiltMapControlButton,
+                      (!asBuiltMapImageUrl || isSubmitting) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={() => adjustAsBuiltMapZoom(0.2)}
+                    disabled={!asBuiltMapImageUrl || isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.asBuiltMapControlText}>+</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.asBuiltMapControlButton,
+                      (!asBuiltMapImageUrl || isSubmitting) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={() => nudgeAsBuiltMap(0, -16)}
+                    disabled={!asBuiltMapImageUrl || isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.asBuiltMapControlText}>Up</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.asBuiltMapControlButton,
+                      (!asBuiltMapImageUrl || isSubmitting) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={() => nudgeAsBuiltMap(-16, 0)}
+                    disabled={!asBuiltMapImageUrl || isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.asBuiltMapControlText}>Left</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.asBuiltMapControlButton,
+                      (!asBuiltMapImageUrl || isSubmitting) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={() => nudgeAsBuiltMap(16, 0)}
+                    disabled={!asBuiltMapImageUrl || isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.asBuiltMapControlText}>Right</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.asBuiltMapControlButton,
+                      (!asBuiltMapImageUrl || isSubmitting) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={() => nudgeAsBuiltMap(0, 16)}
+                    disabled={!asBuiltMapImageUrl || isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.asBuiltMapControlText}>Down</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.asBuiltMapControlButton,
+                      (!asBuiltMapImageUrl || isSubmitting) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={resetAsBuiltMapCrop}
+                    disabled={!asBuiltMapImageUrl || isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.asBuiltMapControlText}>Reset</Text>
+                  </Pressable>
+                </View>
+
                 <View
                   style={styles.asBuiltBoard}
                   onLayout={(event) => {
@@ -4406,7 +4921,16 @@ export default function App() {
                   {asBuiltMapImageUrl ? (
                     <Image
                       source={{ uri: asBuiltMapImageUrl }}
-                      style={styles.asBuiltMapImage}
+                      style={[
+                        styles.asBuiltMapImage,
+                        {
+                          transform: [
+                            { translateX: asBuiltMapOffset.x },
+                            { translateY: asBuiltMapOffset.y },
+                            { scale: asBuiltMapScale },
+                          ],
+                        },
+                      ]}
                       resizeMode="cover"
                     />
                   ) : (
@@ -4461,12 +4985,12 @@ export default function App() {
                       />
                     ))}
 
-                    {currentAsBuiltLine && (
-                      <Line
-                        x1={currentAsBuiltLine.start.x}
-                        y1={currentAsBuiltLine.start.y}
-                        x2={currentAsBuiltLine.end.x}
-                        y2={currentAsBuiltLine.end.y}
+                    {getAsBuiltRoughPoints(currentAsBuiltLine).length > 1 && (
+                      <Polyline
+                        points={formatAsBuiltRoughPoints(
+                          getAsBuiltRoughPoints(currentAsBuiltLine)
+                        )}
+                        fill="none"
                         stroke={currentAsBuiltLine.color}
                         strokeWidth={getAsBuiltWidth(currentAsBuiltLine.width)}
                         strokeDasharray={
@@ -4475,6 +4999,7 @@ export default function App() {
                             : undefined
                         }
                         strokeLinecap="round"
+                        strokeLinejoin="round"
                         opacity={0.72}
                       />
                     )}
@@ -5383,6 +5908,39 @@ const styles = StyleSheet.create({
   asBuiltMapImage: {
     ...StyleSheet.absoluteFillObject,
     opacity: 0.72,
+  },
+
+  asBuiltMapControls: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+  },
+
+  asBuiltMapControlButton: {
+    backgroundColor: "#050505",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.42)",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    minWidth: 48,
+    alignItems: "center",
+  },
+
+  asBuiltMapControlText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  asBuiltMapZoomText: {
+    color: "#D7FF2F",
+    fontSize: 14,
+    fontWeight: "900",
+    minWidth: 42,
+    textAlign: "center",
   },
 
   asBuiltMapPlaceholder: {
