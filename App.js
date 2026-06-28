@@ -191,6 +191,11 @@ const DEFAULT_FIREBASE_REPORT_ENDPOINT =
 const FIREBASE_REPORT_ENDPOINT =
   process.env.EXPO_PUBLIC_FIREBASE_REPORT_ENDPOINT ||
   DEFAULT_FIREBASE_REPORT_ENDPOINT;
+const DEFAULT_FIREBASE_STATIC_MAP_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/staticMap";
+const FIREBASE_STATIC_MAP_ENDPOINT =
+  process.env.EXPO_PUBLIC_FIREBASE_STATIC_MAP_ENDPOINT ||
+  DEFAULT_FIREBASE_STATIC_MAP_ENDPOINT;
 const MAX_REPORT_ATTACHMENT_BYTES = 28 * 1024 * 1024;
 const SETTINGS_STORAGE_KEY = "williams-field-forms-settings";
 const PRESTART_STORAGE_PREFIX = "williams-prestart-values";
@@ -198,8 +203,6 @@ const JOB_STORAGE_KEY = "williams-purchase-order-jobs";
 const DEFAULT_JOB_LIST_URL =
   "https://docs.google.com/spreadsheets/d/1P_KMGAMxyer0hRHwEGWnREwzwbp9cccehEmzJH8fGzg/export?format=csv&gid=0";
 const JOB_LIST_URL = process.env.EXPO_PUBLIC_JOB_LIST_URL || DEFAULT_JOB_LIST_URL;
-const GOOGLE_STATIC_MAPS_API_KEY =
-  process.env.EXPO_PUBLIC_GOOGLE_STATIC_MAPS_API_KEY || "";
 
 const AS_BUILT_LINE_COLORS = [
   { label: "Red", value: "#ff2f2f" },
@@ -507,22 +510,15 @@ const snapAsBuiltLineEnd = (startPoint, endPoint) => {
   });
 };
 
-const createAsBuiltMapUrl = (address, apiKey) => {
+const createAsBuiltMapUrl = (address, endpoint) => {
   const cleanedAddress = String(address || "").trim();
-  const cleanedApiKey = String(apiKey || "").trim();
+  const cleanedEndpoint = String(endpoint || "").trim();
 
-  if (!cleanedAddress || !cleanedApiKey) return "";
+  if (!cleanedAddress || !cleanedEndpoint) return "";
 
-  const params = new URLSearchParams({
-    center: cleanedAddress,
-    zoom: "20",
-    size: "640x640",
-    scale: "2",
-    maptype: "roadmap",
-    key: cleanedApiKey,
-  });
+  const params = new URLSearchParams({ address: cleanedAddress });
 
-  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+  return `${cleanedEndpoint}?${params.toString()}`;
 };
 
 const getAsBuiltColorLabel = (colorValue) =>
@@ -1159,9 +1155,6 @@ export default function App() {
     height: 1,
   });
   const [isDrawingAsBuilt, setIsDrawingAsBuilt] = useState(false);
-  const [settingsGoogleMapsApiKey, setSettingsGoogleMapsApiKey] = useState(
-    GOOGLE_STATIC_MAPS_API_KEY
-  );
   const [hasLoadedJobs, setHasLoadedJobs] = useState(false);
   const asBuiltLineStartRef = useRef(null);
 
@@ -1177,8 +1170,8 @@ export default function App() {
     (job) => job.number === selectedVariationJob
   );
   const asBuiltMapImageUrl = useMemo(
-    () => createAsBuiltMapUrl(asBuiltAddress, settingsGoogleMapsApiKey),
-    [asBuiltAddress, settingsGoogleMapsApiKey]
+    () => createAsBuiltMapUrl(asBuiltAddress, FIREBASE_STATIC_MAP_ENDPOINT),
+    [asBuiltAddress]
   );
 
   const answersSummary = useMemo(
@@ -1230,9 +1223,6 @@ export default function App() {
           setSettingsRecipientEmail(savedRecipientEmail);
         }
 
-        if (typeof parsedSettings.googleMapsStaticApiKey === "string") {
-          setSettingsGoogleMapsApiKey(parsedSettings.googleMapsStaticApiKey);
-        }
       } catch (error) {
         console.warn("Unable to load settings", error);
       }
@@ -1394,7 +1384,6 @@ export default function App() {
   const saveSettings = async (nextSettings) => {
     const settings = {
       recipientEmail,
-      googleMapsStaticApiKey: settingsGoogleMapsApiKey,
       ...nextSettings,
     };
 
@@ -1438,18 +1427,6 @@ export default function App() {
   const restoreDefaultRecipient = async () => {
     setIsSettingsEmailDropdownOpen(false);
     saveRecipientEmailSetting(DEFAULT_EMAIL_RECIPIENT);
-  };
-
-  const saveGoogleMapsApiKeySetting = async () => {
-    try {
-      await saveSettings({
-        googleMapsStaticApiKey: settingsGoogleMapsApiKey.trim(),
-      });
-      setSettingsGoogleMapsApiKey(settingsGoogleMapsApiKey.trim());
-      Alert.alert("Settings Saved", "The map template key has been saved.");
-    } catch (error) {
-      Alert.alert("Settings Error", "Unable to save the map template key.");
-    }
   };
 
   const addSettingsJob = () => {
@@ -3207,28 +3184,9 @@ export default function App() {
 
                 <Text style={styles.formSectionTitle}>Map Template</Text>
                 <Text style={styles.settingsHelpText}>
-                  Optional: save a Google Maps Static API key to show a map
-                  snapshot under As-Built drawings.
+                  As-Built map snapshots are handled securely through Williams
+                  Drainage backend settings.
                 </Text>
-                <StableLabeledInput
-                  label="Google Maps Static API Key"
-                  value={settingsGoogleMapsApiKey}
-                  onChangeText={setSettingsGoogleMapsApiKey}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  commitOnChange
-                  editable={!isSubmitting}
-                />
-                <Pressable
-                  style={styles.secondaryButton}
-                  onPress={saveGoogleMapsApiKeySetting}
-                  disabled={isSubmitting}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    SAVE MAP TEMPLATE KEY
-                  </Text>
-                </Pressable>
               </View>
 
               <View style={styles.card}>
@@ -4454,8 +4412,7 @@ export default function App() {
                   ) : (
                     <View style={styles.asBuiltMapPlaceholder}>
                       <Text style={styles.asBuiltMapPlaceholderText}>
-                        Enter an address and save a Google Maps Static API key
-                        in Settings to show a map template.
+                        Enter an address to show the map template.
                       </Text>
                     </View>
                   )}

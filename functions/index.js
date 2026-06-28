@@ -82,6 +82,13 @@ const normaliseFilename = (filename, index) =>
     .replace(/[^\w.\- ]/g, "_")
     .slice(0, 100);
 
+const normaliseMapAddress = (address) =>
+  String(address || "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+
 const buildReportHtml = ({ reportType, subject, message }) => `
   <div style="font-family: Arial, sans-serif; color: #111; line-height: 1.45; max-width: 760px;">
     <div style="border-bottom: 4px solid #d7ff2f; padding-bottom: 14px; margin-bottom: 18px;">
@@ -220,6 +227,76 @@ exports.sendReport = onRequest(
       response.status(500).json({
         error: error.message || "Unable to send report.",
       });
+    }
+  }
+);
+
+exports.staticMap = onRequest(
+  {
+    region: "australia-southeast1",
+    cors: true,
+    memory: "256MiB",
+    timeoutSeconds: 30,
+    secrets: ["GOOGLE_STATIC_MAPS_API_KEY"],
+  },
+  async (request, response) => {
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    if (request.method !== "GET") {
+      response.status(405).json({ error: "GET required." });
+      return;
+    }
+
+    try {
+      const mapsApiKey = (process.env.GOOGLE_STATIC_MAPS_API_KEY || "").trim();
+      const address = normaliseMapAddress(request.query?.address);
+
+      if (!mapsApiKey) {
+        response.status(500).json({ error: "Map template is not configured." });
+        return;
+      }
+
+      if (!address) {
+        response.status(400).json({ error: "Address is required." });
+        return;
+      }
+
+      const params = new URLSearchParams({
+        center: address,
+        zoom: "20",
+        size: "640x640",
+        scale: "2",
+        maptype: "roadmap",
+        key: mapsApiKey,
+      });
+      const mapResponse = await fetch(
+        `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`
+      );
+
+      if (!mapResponse.ok) {
+        const errorText = await mapResponse.text().catch(() => "");
+
+        console.error("staticMap failed", {
+          status: mapResponse.status,
+          message: errorText.slice(0, 200),
+        });
+        response.status(502).json({ error: "Unable to load map template." });
+        return;
+      }
+
+      const contentType =
+        mapResponse.headers.get("content-type") || "image/png";
+      const imageBytes = Buffer.from(await mapResponse.arrayBuffer());
+
+      response.set("Content-Type", contentType);
+      response.set("Cache-Control", "no-store");
+      response.status(200).send(imageBytes);
+    } catch (error) {
+      console.error("staticMap failed", { message: error.message });
+      response.status(500).json({ error: "Unable to load map template." });
     }
   }
 );
