@@ -106,7 +106,7 @@ const CHECKLIST_TEMPLATES = {
         "Lights",
         "Pressure leaks",
         "Fire extinguisher",
-        "Reversing beeper",
+        "Reversing beeper/camera",
       ],
     },
     {
@@ -197,6 +197,11 @@ const DEFAULT_FIREBASE_STATIC_MAP_ENDPOINT =
 const FIREBASE_STATIC_MAP_ENDPOINT =
   process.env.EXPO_PUBLIC_FIREBASE_STATIC_MAP_ENDPOINT ||
   DEFAULT_FIREBASE_STATIC_MAP_ENDPOINT;
+const DEFAULT_FIREBASE_JOBS_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobs";
+const FIREBASE_JOBS_ENDPOINT =
+  process.env.EXPO_PUBLIC_FIREBASE_JOBS_ENDPOINT ||
+  DEFAULT_FIREBASE_JOBS_ENDPOINT;
 const MAX_REPORT_ATTACHMENT_BYTES = 28 * 1024 * 1024;
 const SETTINGS_STORAGE_KEY = "williams-field-forms-settings";
 const PRESTART_STORAGE_PREFIX = "williams-prestart-values";
@@ -1658,7 +1663,26 @@ export default function App() {
           }
         }
 
-        if (JOB_LIST_URL) {
+        try {
+          if (FIREBASE_JOBS_ENDPOINT) {
+            const response = await fetch(FIREBASE_JOBS_ENDPOINT);
+
+            if (!response.ok) {
+              throw new Error(`Job list request failed: ${response.status}`);
+            }
+
+            const payload = await response.json();
+            const remoteJobs = normalizeJobOptions(payload.jobs || []);
+
+            if (remoteJobs.length > 0) {
+              nextJobOptions = mergeJobOptions(nextJobOptions, remoteJobs);
+            }
+          }
+        } catch (error) {
+          console.warn("Unable to load Firebase jobs", error);
+        }
+
+        if (JOB_LIST_URL && nextJobOptions.length === DEFAULT_JOB_OPTIONS.length) {
           const response = await fetch(JOB_LIST_URL);
 
           if (!response.ok) {
@@ -1666,10 +1690,10 @@ export default function App() {
           }
 
           const csvText = await response.text();
-          const remoteJobs = normalizeJobOptions(parseJobSheetCsv(csvText));
+          const sheetJobs = normalizeJobOptions(parseJobSheetCsv(csvText));
 
-          if (remoteJobs.length > 0) {
-            nextJobOptions = mergeJobOptions(nextJobOptions, remoteJobs);
+          if (sheetJobs.length > 0) {
+            nextJobOptions = mergeJobOptions(nextJobOptions, sheetJobs);
           }
         }
 
@@ -1754,7 +1778,7 @@ export default function App() {
     saveRecipientEmailSetting(DEFAULT_EMAIL_RECIPIENT);
   };
 
-  const addSettingsJob = () => {
+  const addSettingsJob = async () => {
     const digits = String(settingsJobNumber || "").replace(/\D/g, "");
     const jobName = settingsJobName.trim();
 
@@ -1770,23 +1794,79 @@ export default function App() {
 
     const jobNumber = digits.slice(0, 4).padStart(4, "0");
 
-    setJobOptions((currentJobs) =>
-      mergeJobOptions(currentJobs, [{ number: jobNumber, name: jobName }])
-    );
-    setSettingsJobNumber("");
-    setSettingsJobName("");
-    Alert.alert("Job Added", `${jobName} has been added to the job list.`);
+    setIsRefreshingJobs(true);
+
+    try {
+      const response = await fetch(FIREBASE_JOBS_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          number: jobNumber,
+          name: jobName,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to save the job.");
+      }
+
+      const savedJob = normalizeJobOptions([payload.job])[0] || {
+        number: jobNumber,
+        name: jobName,
+      };
+
+      setJobOptions((currentJobs) => mergeJobOptions(currentJobs, [savedJob]));
+      setSettingsJobNumber("");
+      setSettingsJobName("");
+      Alert.alert(
+        "Job Added",
+        `${jobName} has been added to the shared Firebase job list.`
+      );
+    } catch (error) {
+      Alert.alert(
+        "Job Save Error",
+        "Unable to add the job to Firebase. Check the Firebase job database is enabled."
+      );
+    } finally {
+      setIsRefreshingJobs(false);
+    }
   };
 
-  const refreshJobsFromSheet = async () => {
-    if (!JOB_LIST_URL) {
-      Alert.alert("No Sheet Set", "No Google Sheet job list is configured.");
+  const refreshJobs = async () => {
+    if (!FIREBASE_JOBS_ENDPOINT && !JOB_LIST_URL) {
+      Alert.alert("No Job List Set", "No shared job list is configured.");
       return;
     }
 
     setIsRefreshingJobs(true);
 
     try {
+      if (FIREBASE_JOBS_ENDPOINT) {
+        const response = await fetch(FIREBASE_JOBS_ENDPOINT);
+
+        if (!response.ok) {
+          throw new Error(`Job list request failed: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const remoteJobs = normalizeJobOptions(payload.jobs || []);
+
+        if (remoteJobs.length === 0) {
+          Alert.alert("No Jobs Found", "Firebase did not return any jobs.");
+          return;
+        }
+
+        setJobOptions((currentJobs) => mergeJobOptions(currentJobs, remoteJobs));
+        Alert.alert(
+          "Jobs Updated",
+          `${remoteJobs.length} jobs loaded from Firebase.`
+        );
+        return;
+      }
+
       const response = await fetch(JOB_LIST_URL);
 
       if (!response.ok) {
@@ -1794,17 +1874,17 @@ export default function App() {
       }
 
       const csvText = await response.text();
-      const remoteJobs = normalizeJobOptions(parseJobSheetCsv(csvText));
+      const sheetJobs = normalizeJobOptions(parseJobSheetCsv(csvText));
 
-      if (remoteJobs.length === 0) {
+      if (sheetJobs.length === 0) {
         Alert.alert("No Jobs Found", "The Google Sheet did not return any jobs.");
         return;
       }
 
-      setJobOptions((currentJobs) => mergeJobOptions(currentJobs, remoteJobs));
-      Alert.alert("Jobs Updated", `${remoteJobs.length} jobs loaded from the sheet.`);
+      setJobOptions((currentJobs) => mergeJobOptions(currentJobs, sheetJobs));
+      Alert.alert("Jobs Updated", `${sheetJobs.length} jobs loaded from the sheet.`);
     } catch (error) {
-      Alert.alert("Job List Error", "Unable to refresh the Google Sheet job list.");
+      Alert.alert("Job List Error", "Unable to refresh the shared job list.");
     } finally {
       setIsRefreshingJobs(false);
     }
@@ -2018,6 +2098,25 @@ export default function App() {
     error instanceof EmailJSResponseStatus
       ? error.text || `EmailJS returned status ${error.status}.`
       : error.message || String(error);
+
+  const confirmEmailSubmit = (reportName) =>
+    new Promise((resolve) => {
+      Alert.alert(
+        "Send Email?",
+        `Are you sure you want to submit this ${reportName}? The form will reset after it sends.`,
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: "Send",
+            onPress: () => resolve(true),
+          },
+        ]
+      );
+    });
 
   const createPhotoAttachments = async (photoList, filenamePrefix) => {
     let totalBytes = 0;
@@ -2686,6 +2785,8 @@ export default function App() {
       return;
     }
 
+    if (!(await confirmEmailSubmit("As-Built plan"))) return;
+
     setIsSubmitting(true);
 
     try {
@@ -2795,6 +2896,8 @@ export default function App() {
 
   const submitForm = async () => {
     if (!validateForm()) return;
+
+    if (!(await confirmEmailSubmit("prestart checklist"))) return;
 
     setIsSubmitting(true);
 
@@ -2915,6 +3018,8 @@ export default function App() {
       Alert.alert("Validation", "Please describe the incident.");
       return;
     }
+
+    if (!(await confirmEmailSubmit("incident report"))) return;
 
     setIsSubmitting(true);
 
@@ -3067,6 +3172,8 @@ export default function App() {
       return;
     }
 
+    if (!(await confirmEmailSubmit("purchase order request"))) return;
+
     setIsSubmitting(true);
 
     try {
@@ -3176,6 +3283,8 @@ export default function App() {
       Alert.alert("Validation", "Please describe the variation.");
       return;
     }
+
+    if (!(await confirmEmailSubmit("job variation request"))) return;
 
     setIsSubmitting(true);
 
@@ -3310,6 +3419,8 @@ export default function App() {
       Alert.alert("Validation", "Please enter the task description.");
       return;
     }
+
+    if (!(await confirmEmailSubmit("Hazard ID"))) return;
 
     setIsSubmitting(true);
 
@@ -3609,8 +3720,8 @@ export default function App() {
               <View style={styles.card}>
                 <Text style={styles.formSectionTitle}>Job List</Text>
                 <Text style={styles.settingsHelpText}>
-                  Add a job on this device, or refresh from the admin Google
-                  Sheet.
+                  Add a job to the shared Firebase list, or refresh the jobs
+                  saved for all devices.
                 </Text>
 
                 <StableLabeledInput
@@ -3634,12 +3745,16 @@ export default function App() {
                   <Pressable
                     style={styles.settingsPrimaryButton}
                     onPress={addSettingsJob}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isRefreshingJobs}
                     accessibilityRole="button"
                   >
-                    <Text style={styles.settingsPrimaryButtonText}>
-                      ADD JOB TO LIST
-                    </Text>
+                    {isRefreshingJobs ? (
+                      <ActivityIndicator color="#000" />
+                    ) : (
+                      <Text style={styles.settingsPrimaryButtonText}>
+                        ADD JOB TO SHARED LIST
+                      </Text>
+                    )}
                   </Pressable>
 
                   <Pressable
@@ -3647,7 +3762,7 @@ export default function App() {
                       styles.secondaryButton,
                       isRefreshingJobs && styles.disabledButton,
                     ]}
-                    onPress={refreshJobsFromSheet}
+                    onPress={refreshJobs}
                     disabled={isSubmitting || isRefreshingJobs}
                     accessibilityRole="button"
                   >
@@ -3655,7 +3770,7 @@ export default function App() {
                       <ActivityIndicator color="#fff" />
                     ) : (
                       <Text style={styles.secondaryButtonText}>
-                        REFRESH FROM GOOGLE SHEET
+                        REFRESH SHARED JOB LIST
                       </Text>
                     )}
                   </Pressable>
@@ -5088,6 +5203,20 @@ export default function App() {
               </Pressable>
             </>
           )}
+
+          {activePage !== "menu" && (
+            <Pressable
+              style={[
+                styles.bottomBackButton,
+                isSubmitting && styles.disabledButton,
+              ]}
+              onPress={() => setActivePage("menu")}
+              disabled={isSubmitting}
+              accessibilityRole="button"
+            >
+              <Text style={styles.backButtonText}>BACK TO MAIN MENU</Text>
+            </Pressable>
+          )}
             </ScrollView>
             {activePage === "menu" && (
               <Pressable
@@ -5206,6 +5335,18 @@ const styles = StyleSheet.create({
     color: "#D7FF2F",
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  bottomBackButton: {
+    marginTop: 20,
+    marginHorizontal: 18,
+    marginBottom: 8,
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.74)",
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.42)",
   },
 
   tab: {

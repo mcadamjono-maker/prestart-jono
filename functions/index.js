@@ -1,4 +1,5 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const admin = require("firebase-admin");
 
 const MAX_ATTACHMENTS = 8;
 const MAX_BASE64_ATTACHMENT_CHARS = 36 * 1024 * 1024;
@@ -7,6 +8,12 @@ const DEFAULT_FROM_EMAIL = "WDL Field Forms <no-reply@maileroo.com>";
 const DEFAULT_SMTP_HOST = "smtp.maileroo.com";
 const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
 const ALLOWED_RECIPIENT_EMAILS = [DEFAULT_TO_EMAIL.toLowerCase()];
+
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+const getFirestore = () => admin.firestore();
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -88,6 +95,30 @@ const normaliseMapAddress = (address) =>
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 220);
+
+const normaliseJobNumber = (jobNumber) => {
+  const digits = String(jobNumber || "").replace(/\D/g, "");
+
+  if (!digits) return "";
+
+  return digits.slice(0, 4).padStart(4, "0");
+};
+
+const normaliseJobName = (jobName) =>
+  String(jobName || "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+
+const formatJob = (doc) => {
+  const data = doc.data() || {};
+
+  return {
+    number: data.number || doc.id,
+    name: data.name || "",
+  };
+};
 
 const buildReportHtml = ({ reportType, subject, message }) => `
   <div style="font-family: Arial, sans-serif; color: #111; line-height: 1.45; max-width: 760px;">
@@ -226,6 +257,77 @@ exports.sendReport = onRequest(
 
       response.status(500).json({
         error: error.message || "Unable to send report.",
+      });
+    }
+  }
+);
+
+exports.jobs = onRequest(
+  {
+    region: "australia-southeast1",
+    cors: true,
+    memory: "256MiB",
+    timeoutSeconds: 30,
+  },
+  async (request, response) => {
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    try {
+      const jobsCollection = getFirestore().collection("jobs");
+
+      if (request.method === "GET") {
+        const snapshot = await jobsCollection.orderBy("number").get();
+        const jobs = snapshot.docs.map(formatJob).filter((job) => job.name);
+
+        response.status(200).json({ ok: true, jobs });
+        return;
+      }
+
+      if (request.method === "POST") {
+        const jobNumber = normaliseJobNumber(request.body?.number);
+        const jobName = normaliseJobName(request.body?.name);
+
+        if (!jobNumber) {
+          response.status(400).json({ error: "Job number is required." });
+          return;
+        }
+
+        if (!jobName) {
+          response.status(400).json({ error: "Job name is required." });
+          return;
+        }
+
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const jobRef = jobsCollection.doc(jobNumber);
+
+        await jobRef.set(
+          {
+            number: jobNumber,
+            name: jobName,
+            updatedAt: now,
+            createdAt: now,
+          },
+          { merge: true }
+        );
+
+        response.status(200).json({
+          ok: true,
+          job: {
+            number: jobNumber,
+            name: jobName,
+          },
+        });
+        return;
+      }
+
+      response.status(405).json({ error: "GET or POST required." });
+    } catch (error) {
+      console.error("jobs failed", { message: error.message });
+      response.status(500).json({
+        error: error.message || "Unable to update jobs.",
       });
     }
   }
