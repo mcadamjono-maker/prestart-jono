@@ -908,6 +908,7 @@ const buildAsBuiltPdfHtml = ({
   mapImageBase64,
   mapScale,
   mapOffset,
+  mapRotation,
   boardSize,
 }) => {
   const planWidth = 780;
@@ -1022,7 +1023,9 @@ const buildAsBuiltPdfHtml = ({
         opacity: 0.72;
         transform: translate(${mapTranslateX.toFixed(2)}px, ${mapTranslateY.toFixed(
     2
-  )}px) scale(${Number(mapScale || 1).toFixed(2)});
+  )}px) rotate(${Number(mapRotation || 0).toFixed(0)}deg) scale(${Number(
+    mapScale || 1
+  ).toFixed(2)});
         transform-origin: center center;
       }
 
@@ -1474,11 +1477,13 @@ export default function App() {
     AS_BUILT_LINE_STYLES[0].value
   );
   const [asBuiltTool, setAsBuiltTool] = useState("line");
+  const [asBuiltToolPanel, setAsBuiltToolPanel] = useState("draw");
   const [asBuiltLines, setAsBuiltLines] = useState([]);
   const [asBuiltSymbols, setAsBuiltSymbols] = useState([]);
   const [currentAsBuiltLine, setCurrentAsBuiltLine] = useState(null);
   const [asBuiltMapScale, setAsBuiltMapScale] = useState(1);
   const [asBuiltMapOffset, setAsBuiltMapOffset] = useState({ x: 0, y: 0 });
+  const [asBuiltMapRotation, setAsBuiltMapRotation] = useState(0);
   const [asBuiltBoardSize, setAsBuiltBoardSize] = useState({
     width: 1,
     height: 1,
@@ -2076,6 +2081,8 @@ export default function App() {
     setCurrentAsBuiltLine(null);
     setAsBuiltMapScale(1);
     setAsBuiltMapOffset({ x: 0, y: 0 });
+    setAsBuiltMapRotation(0);
+    setAsBuiltToolPanel("draw");
     asBuiltLineStartRef.current = null;
     currentAsBuiltLineRef.current = null;
   };
@@ -2756,9 +2763,18 @@ export default function App() {
     }));
   };
 
+  const rotateAsBuiltMap = (amount) => {
+    setAsBuiltMapRotation((currentRotation) => {
+      const nextRotation = (currentRotation + amount) % 360;
+
+      return nextRotation < 0 ? nextRotation + 360 : nextRotation;
+    });
+  };
+
   const resetAsBuiltMapCrop = () => {
     setAsBuiltMapScale(1);
     setAsBuiltMapOffset({ x: 0, y: 0 });
+    setAsBuiltMapRotation(0);
   };
 
   const submitAsBuilt = async () => {
@@ -2816,6 +2832,7 @@ export default function App() {
           mapImageBase64,
           mapScale: asBuiltMapScale,
           mapOffset: asBuiltMapOffset,
+          mapRotation: asBuiltMapRotation,
           boardSize: asBuiltBoardSize,
         }),
       });
@@ -4787,243 +4804,6 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <Text style={styles.formSectionTitle}>Line Colour</Text>
-                <View style={styles.optionGrid}>
-                  {AS_BUILT_LINE_COLORS.map((color) => {
-                    const isSelected = asBuiltLineColor === color.value;
-
-                    return (
-                      <Pressable
-                        key={color.value}
-                        style={[
-                          styles.asBuiltSwatchButton,
-                          isSelected && styles.asBuiltToolSelected,
-                        ]}
-                        onPress={() => setAsBuiltLineColor(color.value)}
-                        disabled={isSubmitting}
-                        accessibilityRole="button"
-                      >
-                        <View
-                          style={[
-                            styles.asBuiltSwatch,
-                            { backgroundColor: color.value },
-                          ]}
-                        />
-                        <Text
-                          style={[
-                            styles.asBuiltToolText,
-                            isSelected && styles.asBuiltToolTextSelected,
-                          ]}
-                        >
-                          {color.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                <Text style={styles.formSectionTitle}>Line Type</Text>
-                <View style={styles.optionGrid}>
-                  {AS_BUILT_LINE_WIDTHS.map((width) => {
-                    const isSelected = asBuiltLineWidth === width.value;
-
-                    return (
-                      <Pressable
-                        key={width.value}
-                        style={[
-                          styles.asBuiltToolButton,
-                          isSelected && styles.asBuiltToolSelected,
-                        ]}
-                        onPress={() => setAsBuiltLineWidth(width.value)}
-                        disabled={isSubmitting}
-                        accessibilityRole="button"
-                      >
-                        <Text
-                          style={[
-                            styles.asBuiltToolText,
-                            isSelected && styles.asBuiltToolTextSelected,
-                          ]}
-                        >
-                          {width.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-
-                  {AS_BUILT_LINE_STYLES.map((lineStyle) => {
-                    const isSelected = asBuiltLineStyle === lineStyle.value;
-
-                    return (
-                      <Pressable
-                        key={lineStyle.value}
-                        style={[
-                          styles.asBuiltToolButton,
-                          isSelected && styles.asBuiltToolSelected,
-                        ]}
-                        onPress={() => setAsBuiltLineStyle(lineStyle.value)}
-                        disabled={isSubmitting}
-                        accessibilityRole="button"
-                      >
-                        <Text
-                          style={[
-                            styles.asBuiltToolText,
-                            isSelected && styles.asBuiltToolTextSelected,
-                          ]}
-                        >
-                          {lineStyle.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                <Text style={styles.formSectionTitle}>Draw / Symbols</Text>
-                <View style={styles.optionGrid}>
-                  <Pressable
-                    style={[
-                      styles.asBuiltToolButton,
-                      asBuiltTool === "line" && styles.asBuiltToolSelected,
-                    ]}
-                    onPress={() => setAsBuiltTool("line")}
-                    disabled={isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text
-                      style={[
-                        styles.asBuiltToolText,
-                        asBuiltTool === "line" &&
-                          styles.asBuiltToolTextSelected,
-                      ]}
-                    >
-                      Line
-                    </Text>
-                  </Pressable>
-
-                  {AS_BUILT_SYMBOLS.map((symbol) => {
-                    const isSelected = asBuiltTool === symbol.value;
-
-                    return (
-                      <Pressable
-                        key={symbol.value}
-                        style={[
-                          styles.asBuiltToolButton,
-                          isSelected && styles.asBuiltToolSelected,
-                        ]}
-                        onPress={() => setAsBuiltTool(symbol.value)}
-                        disabled={isSubmitting}
-                        accessibilityRole="button"
-                      >
-                        <Text
-                          style={[
-                            styles.asBuiltToolText,
-                            isSelected && styles.asBuiltToolTextSelected,
-                          ]}
-                        >
-                          {symbol.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                <Text style={styles.formSectionTitle}>Map Crop</Text>
-                <View style={styles.asBuiltMapControls}>
-                  <Pressable
-                    style={[
-                      styles.asBuiltMapControlButton,
-                      (!asBuiltMapImageUrl || isSubmitting) &&
-                        styles.disabledControl,
-                    ]}
-                    onPress={() => adjustAsBuiltMapZoom(-0.2)}
-                    disabled={!asBuiltMapImageUrl || isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.asBuiltMapControlText}>-</Text>
-                  </Pressable>
-
-                  <Text style={styles.asBuiltMapZoomText}>
-                    {asBuiltMapScale.toFixed(1)}x
-                  </Text>
-
-                  <Pressable
-                    style={[
-                      styles.asBuiltMapControlButton,
-                      (!asBuiltMapImageUrl || isSubmitting) &&
-                        styles.disabledControl,
-                    ]}
-                    onPress={() => adjustAsBuiltMapZoom(0.2)}
-                    disabled={!asBuiltMapImageUrl || isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.asBuiltMapControlText}>+</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[
-                      styles.asBuiltMapControlButton,
-                      (!asBuiltMapImageUrl || isSubmitting) &&
-                        styles.disabledControl,
-                    ]}
-                    onPress={() => nudgeAsBuiltMap(0, -16)}
-                    disabled={!asBuiltMapImageUrl || isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.asBuiltMapControlText}>Up</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[
-                      styles.asBuiltMapControlButton,
-                      (!asBuiltMapImageUrl || isSubmitting) &&
-                        styles.disabledControl,
-                    ]}
-                    onPress={() => nudgeAsBuiltMap(-16, 0)}
-                    disabled={!asBuiltMapImageUrl || isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.asBuiltMapControlText}>Left</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[
-                      styles.asBuiltMapControlButton,
-                      (!asBuiltMapImageUrl || isSubmitting) &&
-                        styles.disabledControl,
-                    ]}
-                    onPress={() => nudgeAsBuiltMap(16, 0)}
-                    disabled={!asBuiltMapImageUrl || isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.asBuiltMapControlText}>Right</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[
-                      styles.asBuiltMapControlButton,
-                      (!asBuiltMapImageUrl || isSubmitting) &&
-                        styles.disabledControl,
-                    ]}
-                    onPress={() => nudgeAsBuiltMap(0, 16)}
-                    disabled={!asBuiltMapImageUrl || isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.asBuiltMapControlText}>Down</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[
-                      styles.asBuiltMapControlButton,
-                      (!asBuiltMapImageUrl || isSubmitting) &&
-                        styles.disabledControl,
-                    ]}
-                    onPress={resetAsBuiltMapCrop}
-                    disabled={!asBuiltMapImageUrl || isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.asBuiltMapControlText}>Reset</Text>
-                  </Pressable>
-                </View>
-
                 <View
                   style={styles.asBuiltBoard}
                   onLayout={(event) => {
@@ -5031,7 +4811,6 @@ export default function App() {
 
                     setAsBuiltBoardSize({ width, height });
                   }}
-                  {...asBuiltPanResponder.panHandlers}
                 >
                   {asBuiltMapImageUrl ? (
                     <Image
@@ -5042,6 +4821,7 @@ export default function App() {
                           transform: [
                             { translateX: asBuiltMapOffset.x },
                             { translateY: asBuiltMapOffset.y },
+                            { rotate: `${asBuiltMapRotation}deg` },
                             { scale: asBuiltMapScale },
                           ],
                         },
@@ -5123,6 +4903,338 @@ export default function App() {
                       <StableAsBuiltSymbol key={symbol.id} symbol={symbol} />
                     ))}
                   </Svg>
+
+                  <View
+                    style={styles.asBuiltDrawingTouchLayer}
+                    {...asBuiltPanResponder.panHandlers}
+                  />
+
+                  <View style={styles.asBuiltOverlayControls} pointerEvents="box-none">
+                    <View style={styles.asBuiltModeTabs}>
+                      {[
+                        { key: "draw", label: "Draw" },
+                        { key: "symbols", label: "Symbols" },
+                        { key: "map", label: "Map" },
+                      ].map((panel) => {
+                        const isSelected = asBuiltToolPanel === panel.key;
+
+                        return (
+                          <Pressable
+                            key={panel.key}
+                            style={[
+                              styles.asBuiltModeTab,
+                              isSelected && styles.asBuiltModeTabSelected,
+                            ]}
+                            onPress={() =>
+                              setAsBuiltToolPanel((currentPanel) =>
+                                currentPanel === panel.key ? "" : panel.key
+                              )
+                            }
+                            disabled={isSubmitting}
+                            accessibilityRole="button"
+                          >
+                            <Text
+                              style={[
+                                styles.asBuiltModeTabText,
+                                isSelected && styles.asBuiltModeTabTextSelected,
+                              ]}
+                            >
+                              {panel.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
+                    {asBuiltToolPanel === "draw" && (
+                      <View style={styles.asBuiltOverlayPanel}>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          keyboardShouldPersistTaps="handled"
+                        >
+                          <View style={styles.asBuiltOverlayOptionRow}>
+                            <Pressable
+                              style={[
+                                styles.asBuiltToolButton,
+                                asBuiltTool === "line" &&
+                                  styles.asBuiltToolSelected,
+                              ]}
+                              onPress={() => {
+                                setAsBuiltTool("line");
+                                setAsBuiltToolPanel("");
+                              }}
+                              disabled={isSubmitting}
+                              accessibilityRole="button"
+                            >
+                              <Text
+                                style={[
+                                  styles.asBuiltToolText,
+                                  asBuiltTool === "line" &&
+                                    styles.asBuiltToolTextSelected,
+                                ]}
+                              >
+                                Line
+                              </Text>
+                            </Pressable>
+
+                            {AS_BUILT_LINE_COLORS.map((color) => {
+                              const isSelected = asBuiltLineColor === color.value;
+
+                              return (
+                                <Pressable
+                                  key={color.value}
+                                  style={[
+                                    styles.asBuiltSwatchButton,
+                                    isSelected && styles.asBuiltToolSelected,
+                                  ]}
+                                  onPress={() => {
+                                    setAsBuiltLineColor(color.value);
+                                    setAsBuiltTool("line");
+                                    setAsBuiltToolPanel("");
+                                  }}
+                                  disabled={isSubmitting}
+                                  accessibilityRole="button"
+                                >
+                                  <View
+                                    style={[
+                                      styles.asBuiltSwatch,
+                                      { backgroundColor: color.value },
+                                    ]}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.asBuiltToolText,
+                                      isSelected &&
+                                        styles.asBuiltToolTextSelected,
+                                    ]}
+                                  >
+                                    {color.label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+
+                            {AS_BUILT_LINE_WIDTHS.map((width) => {
+                              const isSelected = asBuiltLineWidth === width.value;
+
+                              return (
+                                <Pressable
+                                  key={width.value}
+                                  style={[
+                                    styles.asBuiltToolButton,
+                                    isSelected && styles.asBuiltToolSelected,
+                                  ]}
+                                  onPress={() => {
+                                    setAsBuiltLineWidth(width.value);
+                                    setAsBuiltTool("line");
+                                    setAsBuiltToolPanel("");
+                                  }}
+                                  disabled={isSubmitting}
+                                  accessibilityRole="button"
+                                >
+                                  <Text
+                                    style={[
+                                      styles.asBuiltToolText,
+                                      isSelected &&
+                                        styles.asBuiltToolTextSelected,
+                                    ]}
+                                  >
+                                    {width.label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+
+                            {AS_BUILT_LINE_STYLES.map((lineStyle) => {
+                              const isSelected =
+                                asBuiltLineStyle === lineStyle.value;
+
+                              return (
+                                <Pressable
+                                  key={lineStyle.value}
+                                  style={[
+                                    styles.asBuiltToolButton,
+                                    isSelected && styles.asBuiltToolSelected,
+                                  ]}
+                                  onPress={() => {
+                                    setAsBuiltLineStyle(lineStyle.value);
+                                    setAsBuiltTool("line");
+                                    setAsBuiltToolPanel("");
+                                  }}
+                                  disabled={isSubmitting}
+                                  accessibilityRole="button"
+                                >
+                                  <Text
+                                    style={[
+                                      styles.asBuiltToolText,
+                                      isSelected &&
+                                        styles.asBuiltToolTextSelected,
+                                    ]}
+                                  >
+                                    {lineStyle.label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {asBuiltToolPanel === "symbols" && (
+                      <View style={styles.asBuiltOverlayPanel}>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          keyboardShouldPersistTaps="handled"
+                        >
+                          <View style={styles.asBuiltOverlayOptionRow}>
+                            {AS_BUILT_SYMBOLS.map((symbol) => {
+                              const isSelected = asBuiltTool === symbol.value;
+
+                              return (
+                                <Pressable
+                                  key={symbol.value}
+                                  style={[
+                                    styles.asBuiltToolButton,
+                                    isSelected && styles.asBuiltToolSelected,
+                                  ]}
+                                  onPress={() => {
+                                    setAsBuiltTool(symbol.value);
+                                    setAsBuiltToolPanel("");
+                                  }}
+                                  disabled={isSubmitting}
+                                  accessibilityRole="button"
+                                >
+                                  <Text
+                                    style={[
+                                      styles.asBuiltToolText,
+                                      isSelected &&
+                                        styles.asBuiltToolTextSelected,
+                                    ]}
+                                  >
+                                    {symbol.label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {asBuiltToolPanel === "map" && (
+                      <View style={styles.asBuiltOverlayPanel}>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          keyboardShouldPersistTaps="handled"
+                        >
+                          <View style={styles.asBuiltOverlayOptionRow}>
+                            <Text style={styles.asBuiltMapZoomText}>
+                              {asBuiltMapScale.toFixed(1)}x
+                            </Text>
+                            <Pressable
+                              style={[
+                                styles.asBuiltMapControlButton,
+                                (!asBuiltMapImageUrl || isSubmitting) &&
+                                  styles.disabledControl,
+                              ]}
+                              onPress={() => adjustAsBuiltMapZoom(-0.2)}
+                              disabled={!asBuiltMapImageUrl || isSubmitting}
+                              accessibilityRole="button"
+                            >
+                              <Text style={styles.asBuiltMapControlText}>
+                                Zoom -
+                              </Text>
+                            </Pressable>
+                            <Pressable
+                              style={[
+                                styles.asBuiltMapControlButton,
+                                (!asBuiltMapImageUrl || isSubmitting) &&
+                                  styles.disabledControl,
+                              ]}
+                              onPress={() => adjustAsBuiltMapZoom(0.2)}
+                              disabled={!asBuiltMapImageUrl || isSubmitting}
+                              accessibilityRole="button"
+                            >
+                              <Text style={styles.asBuiltMapControlText}>
+                                Zoom +
+                              </Text>
+                            </Pressable>
+                            <Pressable
+                              style={[
+                                styles.asBuiltMapControlButton,
+                                (!asBuiltMapImageUrl || isSubmitting) &&
+                                  styles.disabledControl,
+                              ]}
+                              onPress={() => rotateAsBuiltMap(-15)}
+                              disabled={!asBuiltMapImageUrl || isSubmitting}
+                              accessibilityRole="button"
+                            >
+                              <Text style={styles.asBuiltMapControlText}>
+                                Rotate -
+                              </Text>
+                            </Pressable>
+                            <Text style={styles.asBuiltMapZoomText}>
+                              {Math.round(asBuiltMapRotation)} deg
+                            </Text>
+                            <Pressable
+                              style={[
+                                styles.asBuiltMapControlButton,
+                                (!asBuiltMapImageUrl || isSubmitting) &&
+                                  styles.disabledControl,
+                              ]}
+                              onPress={() => rotateAsBuiltMap(15)}
+                              disabled={!asBuiltMapImageUrl || isSubmitting}
+                              accessibilityRole="button"
+                            >
+                              <Text style={styles.asBuiltMapControlText}>
+                                Rotate +
+                              </Text>
+                            </Pressable>
+                            {[
+                              ["Up", 0, -16],
+                              ["Left", -16, 0],
+                              ["Right", 16, 0],
+                              ["Down", 0, 16],
+                            ].map(([label, x, y]) => (
+                              <Pressable
+                                key={label}
+                                style={[
+                                  styles.asBuiltMapControlButton,
+                                  (!asBuiltMapImageUrl || isSubmitting) &&
+                                    styles.disabledControl,
+                                ]}
+                                onPress={() => nudgeAsBuiltMap(x, y)}
+                                disabled={!asBuiltMapImageUrl || isSubmitting}
+                                accessibilityRole="button"
+                              >
+                                <Text style={styles.asBuiltMapControlText}>
+                                  {label}
+                                </Text>
+                              </Pressable>
+                            ))}
+                            <Pressable
+                              style={[
+                                styles.asBuiltMapControlButton,
+                                (!asBuiltMapImageUrl || isSubmitting) &&
+                                  styles.disabledControl,
+                              ]}
+                              onPress={resetAsBuiltMapCrop}
+                              disabled={!asBuiltMapImageUrl || isSubmitting}
+                              accessibilityRole="button"
+                            >
+                              <Text style={styles.asBuiltMapControlText}>
+                                Reset
+                              </Text>
+                            </Pressable>
+                          </View>
+                        </ScrollView>
+                      </View>
+                    )}
+                  </View>
                 </View>
 
                 <View style={styles.asBuiltBoardActions}>
@@ -6044,6 +6156,64 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 14,
     position: "relative",
+  },
+
+  asBuiltDrawingTouchLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
+  },
+
+  asBuiltOverlayControls: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    right: 8,
+    zIndex: 8,
+    gap: 6,
+  },
+
+  asBuiltModeTabs: {
+    flexDirection: "row",
+    gap: 6,
+  },
+
+  asBuiltModeTab: {
+    backgroundColor: "rgba(0,0,0,0.74)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+
+  asBuiltModeTabSelected: {
+    backgroundColor: "#D7FF2F",
+    borderColor: "#D7FF2F",
+  },
+
+  asBuiltModeTabText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  asBuiltModeTabTextSelected: {
+    color: "#000",
+  },
+
+  asBuiltOverlayPanel: {
+    backgroundColor: "rgba(0,0,0,0.78)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.32)",
+    padding: 8,
+  },
+
+  asBuiltOverlayOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingRight: 8,
   },
 
   asBuiltMapImage: {
