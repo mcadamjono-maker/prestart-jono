@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import {
@@ -1367,6 +1368,7 @@ const StableCheckRow = ({
 );
 
 export default function App() {
+  const windowDimensions = useWindowDimensions();
   const [activePage, setActivePage] = useState("menu");
   const [recipientEmail, setRecipientEmail] = useState(DEFAULT_EMAIL_RECIPIENT);
   const [settingsRecipientEmail, setSettingsRecipientEmail] =
@@ -1488,10 +1490,12 @@ export default function App() {
     width: 1,
     height: 1,
   });
+  const [isAsBuiltFocused, setIsAsBuiltFocused] = useState(false);
   const [isDrawingAsBuilt, setIsDrawingAsBuilt] = useState(false);
   const [hasLoadedJobs, setHasLoadedJobs] = useState(false);
   const asBuiltLineStartRef = useRef(null);
   const currentAsBuiltLineRef = useRef(null);
+  const asBuiltMapGestureRef = useRef(null);
 
   const checklist = CHECKLIST_TEMPLATES[selectedTemplate];
   const machineFieldLabel =
@@ -1508,6 +1512,9 @@ export default function App() {
     () => createAsBuiltMapUrl(asBuiltAddress, FIREBASE_STATIC_MAP_ENDPOINT),
     [asBuiltAddress]
   );
+  const asBuiltBoardHeight = isAsBuiltFocused
+    ? Math.max(560, windowDimensions.height - 170)
+    : 430;
 
   const answersSummary = useMemo(
     () =>
@@ -2411,6 +2418,106 @@ export default function App() {
     };
   };
 
+  const getAsBuiltTouchPoints = (event) =>
+    Array.from(event.nativeEvent.touches || [])
+      .map((touch) => ({
+        x: Number.isFinite(touch.locationX) ? touch.locationX : touch.pageX,
+        y: Number.isFinite(touch.locationY) ? touch.locationY : touch.pageY,
+      }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+
+  const getAsBuiltTwoFingerInfo = (event) => {
+    const touchPoints = getAsBuiltTouchPoints(event);
+
+    if (touchPoints.length < 2) return null;
+
+    const [firstTouch, secondTouch] = touchPoints;
+    const xDistance = secondTouch.x - firstTouch.x;
+    const yDistance = secondTouch.y - firstTouch.y;
+
+    return {
+      center: {
+        x: (firstTouch.x + secondTouch.x) / 2,
+        y: (firstTouch.y + secondTouch.y) / 2,
+      },
+      distance: Math.max(1, Math.hypot(xDistance, yDistance)),
+      angle: Math.atan2(yDistance, xDistance),
+    };
+  };
+
+  const normaliseMapRotation = (rotation) => {
+    const nextRotation = rotation % 360;
+
+    return nextRotation < 0 ? nextRotation + 360 : nextRotation;
+  };
+
+  const cancelCurrentAsBuiltLine = () => {
+    asBuiltLineStartRef.current = null;
+    currentAsBuiltLineRef.current = null;
+    setCurrentAsBuiltLine(null);
+    setIsDrawingAsBuilt(false);
+  };
+
+  const startAsBuiltMapGesture = (event) => {
+    const gestureInfo = getAsBuiltTwoFingerInfo(event);
+
+    if (!gestureInfo || !asBuiltMapImageUrl) return false;
+
+    asBuiltMapGestureRef.current = {
+      ...gestureInfo,
+      initialScale: asBuiltMapScale,
+      initialOffset: asBuiltMapOffset,
+      initialRotation: asBuiltMapRotation,
+    };
+    cancelCurrentAsBuiltLine();
+
+    return true;
+  };
+
+  const updateAsBuiltMapGesture = (event) => {
+    const gestureInfo = getAsBuiltTwoFingerInfo(event);
+
+    if (!gestureInfo || !asBuiltMapImageUrl) return false;
+
+    if (!asBuiltMapGestureRef.current && !startAsBuiltMapGesture(event)) {
+      return false;
+    }
+
+    const gestureStart = asBuiltMapGestureRef.current;
+    const nextScale = Math.max(
+      1,
+      Math.min(
+        4,
+        Number(
+          (
+            (gestureStart.initialScale * gestureInfo.distance) /
+            gestureStart.distance
+          ).toFixed(2)
+        )
+      )
+    );
+
+    setAsBuiltMapScale(nextScale);
+    setAsBuiltMapOffset({
+      x:
+        gestureStart.initialOffset.x +
+        gestureInfo.center.x -
+        gestureStart.center.x,
+      y:
+        gestureStart.initialOffset.y +
+        gestureInfo.center.y -
+        gestureStart.center.y,
+    });
+    setAsBuiltMapRotation(
+      normaliseMapRotation(
+        gestureStart.initialRotation +
+          ((gestureInfo.angle - gestureStart.angle) * 180) / Math.PI
+      )
+    );
+
+    return true;
+  };
+
   const getAsBuiltSignaturePoint = (event) => {
     const { locationX, locationY } = event.nativeEvent;
     const width = Math.max(asBuiltSignaturePadSize.width, 1);
@@ -2497,6 +2604,11 @@ export default function App() {
         onMoveShouldSetPanResponder: () => !isSubmitting,
         onMoveShouldSetPanResponderCapture: () => !isSubmitting,
         onPanResponderGrant: (event) => {
+          if (getAsBuiltTouchPoints(event).length >= 2) {
+            startAsBuiltMapGesture(event);
+            return;
+          }
+
           const point = getAsBuiltPoint(event);
 
           if (!point) return;
@@ -2530,6 +2642,13 @@ export default function App() {
           setCurrentAsBuiltLine(nextLine);
         },
         onPanResponderMove: (event) => {
+          if (getAsBuiltTouchPoints(event).length >= 2) {
+            updateAsBuiltMapGesture(event);
+            return;
+          }
+
+          if (asBuiltMapGestureRef.current) return;
+
           if (asBuiltTool !== "line" || !asBuiltLineStartRef.current) return;
 
           const point = getAsBuiltPoint(event);
@@ -2569,10 +2688,11 @@ export default function App() {
           });
         },
         onPanResponderRelease: (event) => {
+          const wasMapGesture = !!asBuiltMapGestureRef.current;
           const startPoint = asBuiltLineStartRef.current;
           const point = getAsBuiltPoint(event);
 
-          if (asBuiltTool === "line" && startPoint && point) {
+          if (!wasMapGesture && asBuiltTool === "line" && startPoint && point) {
             const roughPoints = [
               ...(currentAsBuiltLineRef.current?.roughPoints || [startPoint]),
               point,
@@ -2601,16 +2721,12 @@ export default function App() {
             }
           }
 
-          asBuiltLineStartRef.current = null;
-          currentAsBuiltLineRef.current = null;
-          setCurrentAsBuiltLine(null);
-          setIsDrawingAsBuilt(false);
+          asBuiltMapGestureRef.current = null;
+          cancelCurrentAsBuiltLine();
         },
         onPanResponderTerminate: () => {
-          asBuiltLineStartRef.current = null;
-          currentAsBuiltLineRef.current = null;
-          setCurrentAsBuiltLine(null);
-          setIsDrawingAsBuilt(false);
+          asBuiltMapGestureRef.current = null;
+          cancelCurrentAsBuiltLine();
         },
         onShouldBlockNativeResponder: () => true,
       }),
@@ -2619,6 +2735,10 @@ export default function App() {
       asBuiltLineColor,
       asBuiltLineStyle,
       asBuiltLineWidth,
+      asBuiltMapImageUrl,
+      asBuiltMapOffset,
+      asBuiltMapRotation,
+      asBuiltMapScale,
       asBuiltTool,
       isSubmitting,
     ]
@@ -2748,27 +2868,6 @@ export default function App() {
     setCurrentAsBuiltLine(null);
     asBuiltLineStartRef.current = null;
     currentAsBuiltLineRef.current = null;
-  };
-
-  const adjustAsBuiltMapZoom = (amount) => {
-    setAsBuiltMapScale((currentScale) =>
-      Math.max(1, Math.min(3, Number((currentScale + amount).toFixed(2))))
-    );
-  };
-
-  const nudgeAsBuiltMap = (x, y) => {
-    setAsBuiltMapOffset((currentOffset) => ({
-      x: currentOffset.x + x,
-      y: currentOffset.y + y,
-    }));
-  };
-
-  const rotateAsBuiltMap = (amount) => {
-    setAsBuiltMapRotation((currentRotation) => {
-      const nextRotation = (currentRotation + amount) % 360;
-
-      return nextRotation < 0 ? nextRotation + 360 : nextRotation;
-    });
   };
 
   const resetAsBuiltMapCrop = () => {
@@ -4804,8 +4903,23 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
+                <Pressable
+                  style={styles.asBuiltFocusButton}
+                  onPress={() => setIsAsBuiltFocused((current) => !current)}
+                  disabled={isSubmitting}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.asBuiltFocusButtonText}>
+                    {isAsBuiltFocused ? "EXIT FULL SCREEN" : "EDIT FULL SCREEN"}
+                  </Text>
+                </Pressable>
+
                 <View
-                  style={styles.asBuiltBoard}
+                  style={[
+                    styles.asBuiltBoard,
+                    { height: asBuiltBoardHeight },
+                    isAsBuiltFocused && styles.asBuiltBoardFocused,
+                  ]}
                   onLayout={(event) => {
                     const { width, height } = event.nativeEvent.layout;
 
@@ -5135,87 +5249,13 @@ export default function App() {
                             <Text style={styles.asBuiltMapZoomText}>
                               {asBuiltMapScale.toFixed(1)}x
                             </Text>
-                            <Pressable
-                              style={[
-                                styles.asBuiltMapControlButton,
-                                (!asBuiltMapImageUrl || isSubmitting) &&
-                                  styles.disabledControl,
-                              ]}
-                              onPress={() => adjustAsBuiltMapZoom(-0.2)}
-                              disabled={!asBuiltMapImageUrl || isSubmitting}
-                              accessibilityRole="button"
-                            >
-                              <Text style={styles.asBuiltMapControlText}>
-                                Zoom -
-                              </Text>
-                            </Pressable>
-                            <Pressable
-                              style={[
-                                styles.asBuiltMapControlButton,
-                                (!asBuiltMapImageUrl || isSubmitting) &&
-                                  styles.disabledControl,
-                              ]}
-                              onPress={() => adjustAsBuiltMapZoom(0.2)}
-                              disabled={!asBuiltMapImageUrl || isSubmitting}
-                              accessibilityRole="button"
-                            >
-                              <Text style={styles.asBuiltMapControlText}>
-                                Zoom +
-                              </Text>
-                            </Pressable>
-                            <Pressable
-                              style={[
-                                styles.asBuiltMapControlButton,
-                                (!asBuiltMapImageUrl || isSubmitting) &&
-                                  styles.disabledControl,
-                              ]}
-                              onPress={() => rotateAsBuiltMap(-15)}
-                              disabled={!asBuiltMapImageUrl || isSubmitting}
-                              accessibilityRole="button"
-                            >
-                              <Text style={styles.asBuiltMapControlText}>
-                                Rotate -
-                              </Text>
-                            </Pressable>
                             <Text style={styles.asBuiltMapZoomText}>
                               {Math.round(asBuiltMapRotation)} deg
                             </Text>
-                            <Pressable
-                              style={[
-                                styles.asBuiltMapControlButton,
-                                (!asBuiltMapImageUrl || isSubmitting) &&
-                                  styles.disabledControl,
-                              ]}
-                              onPress={() => rotateAsBuiltMap(15)}
-                              disabled={!asBuiltMapImageUrl || isSubmitting}
-                              accessibilityRole="button"
-                            >
-                              <Text style={styles.asBuiltMapControlText}>
-                                Rotate +
-                              </Text>
-                            </Pressable>
-                            {[
-                              ["Up", 0, -16],
-                              ["Left", -16, 0],
-                              ["Right", 16, 0],
-                              ["Down", 0, 16],
-                            ].map(([label, x, y]) => (
-                              <Pressable
-                                key={label}
-                                style={[
-                                  styles.asBuiltMapControlButton,
-                                  (!asBuiltMapImageUrl || isSubmitting) &&
-                                    styles.disabledControl,
-                                ]}
-                                onPress={() => nudgeAsBuiltMap(x, y)}
-                                disabled={!asBuiltMapImageUrl || isSubmitting}
-                                accessibilityRole="button"
-                              >
-                                <Text style={styles.asBuiltMapControlText}>
-                                  {label}
-                                </Text>
-                              </Pressable>
-                            ))}
+                            <Text style={styles.asBuiltMapGestureHint}>
+                              Use two fingers on the drawing to move, zoom, and
+                              rotate the map.
+                            </Text>
                             <Pressable
                               style={[
                                 styles.asBuiltMapControlButton,
@@ -6147,7 +6187,6 @@ const styles = StyleSheet.create({
   },
 
   asBuiltBoard: {
-    height: 430,
     backgroundColor: "#f4f4f4",
     borderRadius: 18,
     overflow: "hidden",
@@ -6156,6 +6195,29 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 14,
     position: "relative",
+  },
+
+  asBuiltBoardFocused: {
+    marginHorizontal: -10,
+    borderRadius: 12,
+  },
+
+  asBuiltFocusButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(0,0,0,0.62)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.34)",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginTop: 2,
+    marginBottom: 10,
+  },
+
+  asBuiltFocusButtonText: {
+    color: "#D7FF2F",
+    fontSize: 12,
+    fontWeight: "900",
   },
 
   asBuiltDrawingTouchLayer: {
@@ -6252,6 +6314,13 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     minWidth: 42,
     textAlign: "center",
+  },
+
+  asBuiltMapGestureHint: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+    maxWidth: 260,
   },
 
   asBuiltMapPlaceholder: {
