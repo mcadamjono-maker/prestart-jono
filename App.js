@@ -24,7 +24,7 @@ import Svg, {
   Line,
   Path,
   Polyline,
-  Text as SvgText,
+  Rect,
 } from "react-native-svg";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -225,16 +225,16 @@ const AS_BUILT_LINE_STYLES = [
   { label: "Dotted", value: "dotted" },
 ];
 const AS_BUILT_SYMBOLS = [
-  { label: "IP", value: "inspection_point", shortLabel: "IP" },
-  { label: "GT", value: "gully_trap", shortLabel: "GT" },
-  { label: "Vent", value: "vent", shortLabel: "V" },
-  { label: "MH", value: "manhole", shortLabel: "MH" },
-  { label: "CP", value: "cesspit", shortLabel: "CP" },
-  { label: "DP", value: "downpipe", shortLabel: "DP" },
-  { label: "Flow ->", value: "flow_right", shortLabel: "->" },
-  { label: "Flow <-", value: "flow_left", shortLabel: "<-" },
-  { label: "Flow up", value: "flow_up", shortLabel: "^" },
-  { label: "Flow down", value: "flow_down", shortLabel: "v" },
+  { label: "IP", value: "inspection_point" },
+  { label: "GT", value: "gully_trap" },
+  { label: "Vent", value: "vent" },
+  { label: "MH", value: "manhole" },
+  { label: "Soak", value: "cesspit" },
+  { label: "DP", value: "downpipe" },
+  { label: "Flow >", value: "flow_right" },
+  { label: "Flow <", value: "flow_left" },
+  { label: "Flow ^", value: "flow_up" },
+  { label: "Flow v", value: "flow_down" },
 ];
 
 const DEFAULT_JOB_OPTIONS = [
@@ -672,6 +672,87 @@ const getAsBuiltFlowPoints = (symbol) => {
   };
 };
 
+const buildAsBuiltSymbolMarkup = (symbol) => {
+  const x = Number(symbol.x || 0);
+  const y = Number(symbol.y || 0);
+
+  if (isAsBuiltFlowSymbol(symbol.type)) {
+    const flow = getAsBuiltFlowPoints(symbol);
+
+    return `
+        <line x1="${flow.start.x.toFixed(2)}" y1="${flow.start.y.toFixed(
+      2
+    )}" x2="${flow.end.x.toFixed(2)}" y2="${flow.end.y.toFixed(
+      2
+    )}" stroke="#b92b2b" stroke-width="1.3" stroke-linecap="round" marker-end="url(#arrowhead)" />`;
+  }
+
+  if (symbol.type === "inspection_point") {
+    return `
+        <rect x="${(x - 2.3).toFixed(2)}" y="${(y - 2.3).toFixed(
+      2
+    )}" width="4.6" height="4.6" fill="none" stroke="#b92b2b" stroke-width="1" />
+        <circle cx="${x.toFixed(2)}" cy="${y.toFixed(
+      2
+    )}" r="0.65" fill="#b92b2b" />`;
+  }
+
+  if (symbol.type === "gully_trap") {
+    return `
+        <rect x="${(x - 3).toFixed(2)}" y="${(y - 2).toFixed(
+      2
+    )}" width="6" height="4" fill="none" stroke="#b92b2b" stroke-width="1" />
+        <line x1="${(x - 4.8).toFixed(2)}" y1="${y.toFixed(
+      2
+    )}" x2="${(x - 3).toFixed(2)}" y2="${y.toFixed(
+      2
+    )}" stroke="#b92b2b" stroke-width="1" stroke-linecap="round" />`;
+  }
+
+  if (symbol.type === "vent") {
+    return `
+        <circle cx="${x.toFixed(2)}" cy="${y.toFixed(
+      2
+    )}" r="1.75" fill="none" stroke="#b92b2b" stroke-width="1" />
+        <line x1="${x.toFixed(2)}" y1="${(y - 4.2).toFixed(
+      2
+    )}" x2="${x.toFixed(2)}" y2="${(y - 1.75).toFixed(
+      2
+    )}" stroke="#b92b2b" stroke-width="1" stroke-linecap="round" />`;
+  }
+
+  if (symbol.type === "manhole") {
+    return `
+        <circle cx="${x.toFixed(2)}" cy="${y.toFixed(
+      2
+    )}" r="4" fill="none" stroke="#b92b2b" stroke-width="1.2" />
+        <circle cx="${x.toFixed(2)}" cy="${y.toFixed(
+      2
+    )}" r="1.2" fill="none" stroke="#b92b2b" stroke-width="0.9" />`;
+  }
+
+  if (symbol.type === "cesspit") {
+    return `
+        <circle cx="${x.toFixed(2)}" cy="${y.toFixed(
+      2
+    )}" r="3.7" fill="none" stroke="#0f7f5f" stroke-width="1.1" />
+        <circle cx="${(x - 1.2).toFixed(2)}" cy="${(y - 1.1).toFixed(
+      2
+    )}" r="0.45" fill="#0f7f5f" />
+        <circle cx="${(x + 1.1).toFixed(2)}" cy="${(y - 0.8).toFixed(
+      2
+    )}" r="0.45" fill="#0f7f5f" />
+        <circle cx="${(x - 0.2).toFixed(2)}" cy="${(y + 1.15).toFixed(
+      2
+    )}" r="0.45" fill="#0f7f5f" />`;
+  }
+
+  return `
+        <circle cx="${x.toFixed(2)}" cy="${y.toFixed(
+    2
+  )}" r="1.8" fill="#0f7f5f" stroke="#0f7f5f" stroke-width="0.8" />`;
+};
+
 const buildSvgPolylineMarkup = ({
   strokes = [],
   x = 0,
@@ -730,37 +811,14 @@ const buildAsBuiltSvg = ({
     })
     .join("\n");
   const symbolMarkup = symbols
-    .map((symbol) => {
-      const symbolConfig = getAsBuiltSymbol(symbol.type);
-
-      if (isAsBuiltFlowSymbol(symbol.type)) {
-        const flow = getAsBuiltFlowPoints(symbol);
-
-        return `
-        <line x1="${flow.start.x.toFixed(2)}" y1="${flow.start.y.toFixed(
-          2
-        )}" x2="${flow.end.x.toFixed(2)}" y2="${flow.end.y.toFixed(
-          2
-        )}" stroke="#111111" stroke-width="1.3" stroke-linecap="round" marker-end="url(#arrowhead)" />`;
-      }
-
-      return `
-        <circle cx="${symbol.x.toFixed(2)}" cy="${symbol.y.toFixed(
-        2
-      )}" r="3.6" fill="#ffffff" stroke="#111111" stroke-width="0.9" />
-        <text x="${symbol.x.toFixed(2)}" y="${(symbol.y + 1.25).toFixed(
-        2
-      )}" text-anchor="middle" font-family="Arial, sans-serif" font-size="2.7" font-weight="700" fill="#111111">${escapeXml(
-        symbolConfig.shortLabel
-      )}</text>`;
-    })
+    .map((symbol) => buildAsBuiltSymbolMarkup(symbol))
     .join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1400" viewBox="0 0 100 118">
   <defs>
     <marker id="arrowhead" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
-      <path d="M0,0 L5,2.5 L0,5 Z" fill="#111111" />
+      <path d="M0,0 L5,2.5 L0,5 Z" fill="#b92b2b" />
     </marker>
   </defs>
   <rect width="100" height="118" fill="#ffffff" />
@@ -851,36 +909,13 @@ const buildAsBuiltPlanOnlySvg = ({ lines, symbols }) => {
     })
     .join("\n");
   const symbolMarkup = symbols
-    .map((symbol) => {
-      const symbolConfig = getAsBuiltSymbol(symbol.type);
-
-      if (isAsBuiltFlowSymbol(symbol.type)) {
-        const flow = getAsBuiltFlowPoints(symbol);
-
-        return `
-        <line x1="${flow.start.x.toFixed(2)}" y1="${flow.start.y.toFixed(
-          2
-        )}" x2="${flow.end.x.toFixed(2)}" y2="${flow.end.y.toFixed(
-          2
-        )}" stroke="#111111" stroke-width="1.3" stroke-linecap="round" marker-end="url(#arrowhead)" />`;
-      }
-
-      return `
-        <circle cx="${symbol.x.toFixed(2)}" cy="${symbol.y.toFixed(
-        2
-      )}" r="3.6" fill="#ffffff" stroke="#111111" stroke-width="0.9" />
-        <text x="${symbol.x.toFixed(2)}" y="${(symbol.y + 1.25).toFixed(
-        2
-      )}" text-anchor="middle" font-family="Arial, sans-serif" font-size="2.7" font-weight="700" fill="#111111">${escapeXml(
-        symbolConfig.shortLabel
-      )}</text>`;
-    })
+    .map((symbol) => buildAsBuiltSymbolMarkup(symbol))
     .join("\n");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">
     <defs>
       <marker id="arrowhead" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
-        <path d="M0,0 L5,2.5 L0,5 Z" fill="#111111" />
+        <path d="M0,0 L5,2.5 L0,5 Z" fill="#b92b2b" />
       </marker>
     </defs>
     <rect width="100" height="100" fill="rgba(255,255,255,0.54)" />
@@ -1151,11 +1186,196 @@ const FailCrossIcon = ({ active }) => (
   </Svg>
 );
 
-const StableAsBuiltSymbol = ({ symbol }) => {
-  const symbolConfig = getAsBuiltSymbol(symbol.type);
+const AsBuiltLineSample = ({
+  color = "#fff",
+  strokeWidth = 2,
+  dotted = false,
+}) => (
+  <Svg width={56} height={22} viewBox="0 0 56 22" pointerEvents="none">
+    <Line
+      x1={6}
+      y1={11}
+      x2={50}
+      y2={11}
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeDasharray={dotted ? "4 5" : undefined}
+      strokeLinecap="round"
+    />
+  </Svg>
+);
 
+const AsBuiltSymbolPreview = ({ symbolType }) => (
+  <Svg width={34} height={30} viewBox="0 0 24 24" pointerEvents="none">
+    {symbolType === "inspection_point" && (
+      <>
+        <Rect
+          x={8}
+          y={8}
+          width={8}
+          height={8}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+        />
+        <Circle cx={12} cy={12} r={1} fill="#b92b2b" />
+      </>
+    )}
+    {symbolType === "gully_trap" && (
+      <>
+        <Rect
+          x={7}
+          y={9}
+          width={10}
+          height={6}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+        />
+        <Line
+          x1={4}
+          y1={12}
+          x2={7}
+          y2={12}
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+      </>
+    )}
+    {symbolType === "vent" && (
+      <>
+        <Circle
+          cx={12}
+          cy={14}
+          r={3}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+        />
+        <Line
+          x1={12}
+          y1={5}
+          x2={12}
+          y2={11}
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+      </>
+    )}
+    {symbolType === "manhole" && (
+      <>
+        <Circle
+          cx={12}
+          cy={12}
+          r={7}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+        />
+        <Circle
+          cx={12}
+          cy={12}
+          r={2.3}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.6}
+        />
+      </>
+    )}
+    {symbolType === "cesspit" && (
+      <>
+        <Circle
+          cx={12}
+          cy={12}
+          r={7}
+          fill="none"
+          stroke="#0f7f5f"
+          strokeWidth={1.8}
+        />
+        <Circle cx={9.5} cy={10} r={1} fill="#0f7f5f" />
+        <Circle cx={14.5} cy={10.6} r={1} fill="#0f7f5f" />
+        <Circle cx={12} cy={15} r={1} fill="#0f7f5f" />
+      </>
+    )}
+    {symbolType === "downpipe" && (
+      <Circle
+        cx={12}
+        cy={12}
+        r={4}
+        fill="#0f7f5f"
+        stroke="#0f7f5f"
+        strokeWidth={1.4}
+      />
+    )}
+    {isAsBuiltFlowSymbol(symbolType) && (
+      <>
+        <Line
+          x1={
+            symbolType === "flow_left" ? 18 : symbolType === "flow_right" ? 6 : 12
+          }
+          y1={
+            symbolType === "flow_up" ? 18 : symbolType === "flow_down" ? 6 : 12
+          }
+          x2={
+            symbolType === "flow_left" ? 6 : symbolType === "flow_right" ? 18 : 12
+          }
+          y2={
+            symbolType === "flow_up" ? 6 : symbolType === "flow_down" ? 18 : 12
+          }
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+        <Path
+          d={
+            symbolType === "flow_left"
+              ? "M6 12 10 9.5M6 12 10 14.5"
+              : symbolType === "flow_up"
+              ? "M12 6 9.5 10M12 6 14.5 10"
+              : symbolType === "flow_down"
+              ? "M12 18 9.5 14M12 18 14.5 14"
+              : "M18 12 14 9.5M18 12 14 14.5"
+          }
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
+    )}
+  </Svg>
+);
+
+const StableAsBuiltSymbol = ({ symbol }) => {
   if (isAsBuiltFlowSymbol(symbol.type)) {
     const flow = getAsBuiltFlowPoints(symbol);
+    const arrowPath =
+      symbol.type === "flow_left"
+        ? `M${flow.end.x},${flow.end.y} L${flow.end.x + 2.4},${
+            flow.end.y - 1.6
+          } M${flow.end.x},${flow.end.y} L${flow.end.x + 2.4},${
+            flow.end.y + 1.6
+          }`
+        : symbol.type === "flow_up"
+        ? `M${flow.end.x},${flow.end.y} L${flow.end.x - 1.6},${
+            flow.end.y + 2.4
+          } M${flow.end.x},${flow.end.y} L${flow.end.x + 1.6},${
+            flow.end.y + 2.4
+          }`
+        : symbol.type === "flow_down"
+        ? `M${flow.end.x},${flow.end.y} L${flow.end.x - 1.6},${
+            flow.end.y - 2.4
+          } M${flow.end.x},${flow.end.y} L${flow.end.x + 1.6},${
+            flow.end.y - 2.4
+          }`
+        : `M${flow.end.x},${flow.end.y} L${flow.end.x - 2.4},${
+            flow.end.y - 1.6
+          } M${flow.end.x},${flow.end.y} L${flow.end.x - 2.4},${
+            flow.end.y + 1.6
+          }`;
 
     return (
       <>
@@ -1164,11 +1384,125 @@ const StableAsBuiltSymbol = ({ symbol }) => {
           y1={flow.start.y}
           x2={flow.end.x}
           y2={flow.end.y}
-          stroke="#111"
+          stroke="#b92b2b"
           strokeWidth={1.5}
           strokeLinecap="round"
         />
-        <Circle cx={flow.end.x} cy={flow.end.y} r={1.8} fill="#111" />
+        <Path
+          d={arrowPath}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
+    );
+  }
+
+  if (symbol.type === "inspection_point") {
+    return (
+      <>
+        <Rect
+          x={symbol.x - 2.3}
+          y={symbol.y - 2.3}
+          width={4.6}
+          height={4.6}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1}
+        />
+        <Circle cx={symbol.x} cy={symbol.y} r={0.65} fill="#b92b2b" />
+      </>
+    );
+  }
+
+  if (symbol.type === "gully_trap") {
+    return (
+      <>
+        <Rect
+          x={symbol.x - 3}
+          y={symbol.y - 2}
+          width={6}
+          height={4}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1}
+        />
+        <Line
+          x1={symbol.x - 4.8}
+          y1={symbol.y}
+          x2={symbol.x - 3}
+          y2={symbol.y}
+          stroke="#b92b2b"
+          strokeWidth={1}
+          strokeLinecap="round"
+        />
+      </>
+    );
+  }
+
+  if (symbol.type === "vent") {
+    return (
+      <>
+        <Circle
+          cx={symbol.x}
+          cy={symbol.y}
+          r={1.75}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1}
+        />
+        <Line
+          x1={symbol.x}
+          y1={symbol.y - 4.2}
+          x2={symbol.x}
+          y2={symbol.y - 1.75}
+          stroke="#b92b2b"
+          strokeWidth={1}
+          strokeLinecap="round"
+        />
+      </>
+    );
+  }
+
+  if (symbol.type === "manhole") {
+    return (
+      <>
+        <Circle
+          cx={symbol.x}
+          cy={symbol.y}
+          r={4}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={1.2}
+        />
+        <Circle
+          cx={symbol.x}
+          cy={symbol.y}
+          r={1.2}
+          fill="none"
+          stroke="#b92b2b"
+          strokeWidth={0.9}
+        />
+      </>
+    );
+  }
+
+  if (symbol.type === "cesspit") {
+    return (
+      <>
+        <Circle
+          cx={symbol.x}
+          cy={symbol.y}
+          r={3.7}
+          fill="none"
+          stroke="#0f7f5f"
+          strokeWidth={1.1}
+        />
+        <Circle cx={symbol.x - 1.2} cy={symbol.y - 1.1} r={0.45} fill="#0f7f5f" />
+        <Circle cx={symbol.x + 1.1} cy={symbol.y - 0.8} r={0.45} fill="#0f7f5f" />
+        <Circle cx={symbol.x - 0.2} cy={symbol.y + 1.15} r={0.45} fill="#0f7f5f" />
       </>
     );
   }
@@ -1178,21 +1512,11 @@ const StableAsBuiltSymbol = ({ symbol }) => {
       <Circle
         cx={symbol.x}
         cy={symbol.y}
-        r={4.1}
-        fill="#fff"
-        stroke="#111"
-        strokeWidth={1.1}
+        r={1.8}
+        fill="#0f7f5f"
+        stroke="#0f7f5f"
+        strokeWidth={0.8}
       />
-      <SvgText
-        x={symbol.x}
-        y={symbol.y + 1.45}
-        fill="#111"
-        fontSize={3.2}
-        fontWeight="800"
-        textAnchor="middle"
-      >
-        {symbolConfig.shortLabel}
-      </SvgText>
     </>
   );
 };
@@ -1512,9 +1836,14 @@ export default function App() {
     () => createAsBuiltMapUrl(asBuiltAddress, FIREBASE_STATIC_MAP_ENDPOINT),
     [asBuiltAddress]
   );
-  const asBuiltBoardHeight = isAsBuiltFocused
-    ? Math.max(560, windowDimensions.height - 170)
-    : 430;
+  const asBuiltBoardPixelSize = Math.max(
+    300,
+    Math.min(
+      isAsBuiltFocused ? 620 : 430,
+      windowDimensions.width - (isAsBuiltFocused ? 36 : 72),
+      windowDimensions.height - 170
+    )
+  );
 
   const answersSummary = useMemo(
     () =>
@@ -4917,7 +5246,10 @@ export default function App() {
                 <View
                   style={[
                     styles.asBuiltBoard,
-                    { height: asBuiltBoardHeight },
+                    {
+                      width: asBuiltBoardPixelSize,
+                      height: asBuiltBoardPixelSize,
+                    },
                     isAsBuiltFocused && styles.asBuiltBoardFocused,
                   ]}
                   onLayout={(event) => {
@@ -5147,15 +5479,10 @@ export default function App() {
                                   disabled={isSubmitting}
                                   accessibilityRole="button"
                                 >
-                                  <Text
-                                    style={[
-                                      styles.asBuiltToolText,
-                                      isSelected &&
-                                        styles.asBuiltToolTextSelected,
-                                    ]}
-                                  >
-                                    {width.label}
-                                  </Text>
+                                  <AsBuiltLineSample
+                                    color={isSelected ? "#000" : "#fff"}
+                                    strokeWidth={getAsBuiltWidth(width.value)}
+                                  />
                                 </Pressable>
                               );
                             })}
@@ -5179,15 +5506,11 @@ export default function App() {
                                   disabled={isSubmitting}
                                   accessibilityRole="button"
                                 >
-                                  <Text
-                                    style={[
-                                      styles.asBuiltToolText,
-                                      isSelected &&
-                                        styles.asBuiltToolTextSelected,
-                                    ]}
-                                  >
-                                    {lineStyle.label}
-                                  </Text>
+                                  <AsBuiltLineSample
+                                    color={isSelected ? "#000" : "#fff"}
+                                    strokeWidth={2.4}
+                                    dotted={lineStyle.value === "dotted"}
+                                  />
                                 </Pressable>
                               );
                             })}
@@ -5221,6 +5544,9 @@ export default function App() {
                                   disabled={isSubmitting}
                                   accessibilityRole="button"
                                 >
+                                  <AsBuiltSymbolPreview
+                                    symbolType={symbol.value}
+                                  />
                                   <Text
                                     style={[
                                       styles.asBuiltToolText,
@@ -6163,8 +6489,12 @@ const styles = StyleSheet.create({
   },
 
   asBuiltToolButton: {
+    alignItems: "center",
     backgroundColor: "#050505",
     borderRadius: 14,
+    gap: 3,
+    justifyContent: "center",
+    minHeight: 46,
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderWidth: 1,
@@ -6187,6 +6517,7 @@ const styles = StyleSheet.create({
   },
 
   asBuiltBoard: {
+    alignSelf: "center",
     backgroundColor: "#f4f4f4",
     borderRadius: 18,
     overflow: "hidden",
