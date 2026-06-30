@@ -33,7 +33,17 @@
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "WDL Field Forms",
+      "shortName": "WDL Forms",
+      "description": "Williams Drainage field forms for prestarts, incidents, purchase requests, job variations, hazard IDs, and as-built plans.",
+      "lang": "en-NZ",
+      "display": "standalone",
+      "orientation": "portrait",
+      "themeColor": "#D7FF2F",
+      "backgroundColor": "#000000",
+      "startUrl": "/",
+      "scope": "/"
     },
     "extra": {
       "eas": {

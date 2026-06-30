@@ -10,7 +10,10 @@
     "firebase:deploy": "npm --prefix functions install && npx firebase-tools deploy --only functions",
     "firebase:serve": "npm --prefix functions install && npx firebase-tools emulators:start --only functions",
     "preview-web": "node scripts/static-preview-server.js",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "web:build": "expo export --platform web --output-dir web-build",
+    "web:preview": "node scripts/static-preview-server.js",
+    "web:deploy": "npm run web:build && npx firebase-tools deploy --only hosting"
   },
   "dependencies": {
     "@emailjs/react-native": "^5.1.0",

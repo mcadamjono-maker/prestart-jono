@@ -3,7 +3,7 @@ const http = require("http");
 const path = require("path");
 
 const port = Number(process.env.WEB_PREVIEW_PORT || 8082);
-const root = path.resolve(process.env.WEB_PREVIEW_DIR || "dist-test-assets");
+const root = path.resolve(process.env.WEB_PREVIEW_DIR || "web-build");
 
 const contentTypes = {
   ".css": "text/css",
@@ -17,7 +17,7 @@ const contentTypes = {
 };
 
 if (!fs.existsSync(path.join(root, "index.html"))) {
-  console.error(`Missing web export at ${root}. Run: npx expo export --platform web --output-dir dist-test-assets`);
+  console.error(`Missing web export at ${root}. Run: npm run web:build`);
   process.exit(1);
 }
 

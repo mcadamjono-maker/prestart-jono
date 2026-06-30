@@ -1,0 +1,25 @@
+{
+  "name": "WDL Field Forms",
+  "short_name": "WDL Forms",
+  "description": "Williams Drainage field forms for prestarts, incidents, purchase requests, job variations, hazard IDs, and as-built plans.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#D7FF2F",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/web-app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

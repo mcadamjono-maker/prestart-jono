@@ -210,6 +210,7 @@ const JOB_STORAGE_KEY = "williams-purchase-order-jobs";
 const DEFAULT_JOB_LIST_URL =
   "https://docs.google.com/spreadsheets/d/1P_KMGAMxyer0hRHwEGWnREwzwbp9cccehEmzJH8fGzg/export?format=csv&gid=0";
 const JOB_LIST_URL = process.env.EXPO_PUBLIC_JOB_LIST_URL || DEFAULT_JOB_LIST_URL;
+const IS_WEB = Platform.OS === "web";
 
 const AS_BUILT_LINE_COLORS = [
   { label: "Red", value: "#ff2f2f" },
@@ -612,6 +613,46 @@ const createAsBuiltMapUrl = (address, endpoint) => {
   const params = new URLSearchParams({ address: cleanedAddress });
 
   return `${cleanedEndpoint}?${params.toString()}`;
+};
+
+const encodeUtf8ToBase64 = (value) => {
+  if (typeof btoa !== "function" || typeof TextEncoder === "undefined") {
+    throw new Error("This browser cannot prepare the attachment.");
+  }
+
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return btoa(binary);
+};
+
+const readBlobAsBase64 = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onloadend = () => {
+      const result = String(reader.result || "");
+      const [, base64Content = ""] = result.split(",");
+
+      resolve(base64Content);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const readWebUriAsBase64 = async (uri) => {
+  if (String(uri || "").startsWith("data:")) {
+    return String(uri).split(",")[1] || "";
+  }
+
+  const response = await fetch(uri);
+  const blob = await response.blob();
+
+  return readBlobAsBase64(blob);
 };
 
 const getAsBuiltColorLabel = (colorValue) =>
@@ -2278,6 +2319,26 @@ export default function App() {
   };
 
   const captureCompressedPhoto = async (fallbackFileName) => {
+    if (IS_WEB) {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.55,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const selectedPhoto = result.assets[0];
+
+        return {
+          ...selectedPhoto,
+          fileName: selectedPhoto.fileName || fallbackFileName,
+          mimeType: selectedPhoto.mimeType || "image/jpeg",
+        };
+      }
+
+      return null;
+    }
+
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
@@ -2466,10 +2527,13 @@ export default function App() {
     const attachments = [];
 
     for (const [index, capturedPhoto] of photoList.entries()) {
-      const base64Content = await FileSystem.readAsStringAsync(
-        capturedPhoto.uri,
-        { encoding: FileSystem.EncodingType.Base64 }
-      );
+      const base64Content =
+        capturedPhoto.base64 ||
+        (IS_WEB
+          ? await readWebUriAsBase64(capturedPhoto.uri)
+          : await FileSystem.readAsStringAsync(capturedPhoto.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            }));
       const estimatedBytes = Math.ceil((base64Content.length * 3) / 4);
 
       totalBytes += estimatedBytes;
@@ -2498,6 +2562,20 @@ export default function App() {
     contentType,
   }) => {
     const safeFilename = filename.replace(/[^\w.\-]/g, "_");
+
+    if (IS_WEB) {
+      const base64Content = encodeUtf8ToBase64(content);
+
+      return {
+        attachment: {
+          filename: safeFilename,
+          content: base64Content,
+          contentType,
+        },
+        uri: `data:${contentType};base64,${base64Content}`,
+      };
+    }
+
     const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
 
     if (!baseDirectory) {
@@ -2525,6 +2603,10 @@ export default function App() {
   };
 
   const createPdfAttachment = async ({ filename, html }) => {
+    if (IS_WEB) {
+      throw new Error("PDF creation is only available in the installed app.");
+    }
+
     const safeFilename = filename.replace(/[^\w.\-]/g, "_");
     const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
 
@@ -2563,6 +2645,14 @@ export default function App() {
 
   const getMapImageBase64 = async (imageUrl) => {
     if (!imageUrl) return "";
+
+    if (IS_WEB) {
+      try {
+        return await readWebUriAsBase64(imageUrl);
+      } catch {
+        return "";
+      }
+    }
 
     const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
 
@@ -3252,18 +3342,41 @@ export default function App() {
         symbols: asBuiltSymbols,
       });
       const mapImageBase64 = await getMapImageBase64(asBuiltMapImageUrl);
-      const planAttachment = await createPdfAttachment({
-        filename: `as-built-${Date.now()}.pdf`,
-        html: buildAsBuiltPdfHtml({
-          fieldRows: asBuiltFieldRows,
-          planSvg,
-          mapImageBase64,
-          mapScale: asBuiltMapScale,
-          mapOffset: asBuiltMapOffset,
-          mapRotation: asBuiltMapRotation,
-          boardSize: asBuiltBoardSize,
-        }),
-      });
+      const planAttachment = IS_WEB
+        ? await createTextFileAttachment({
+            filename: `as-built-${Date.now()}.svg`,
+            content: buildAsBuiltSvg({
+              address: asBuiltAddress.trim(),
+              owner: asBuiltOwner.trim(),
+              lotNumber: asBuiltLotNumber.trim(),
+              dpsNumber: asBuiltDpsNumber.trim(),
+              buildingConsentNumber: asBuiltBuildingConsentNumber.trim(),
+              inspectionDate: asBuiltInspectionDate.trim(),
+              inspector: asBuiltInspector.trim(),
+              drainlayer: asBuiltDrainlayer.trim(),
+              drainageLicenseNumber: asBuiltDrainageLicenseNumber.trim(),
+              drainlayerSignatureStrokes: asBuiltDrainlayerSignatureStrokes,
+              notes: asBuiltNotes.trim(),
+              lines: asBuiltLines,
+              symbols: asBuiltSymbols,
+              mapUrl: asBuiltMapImageUrl,
+              mapScale: asBuiltMapScale,
+              mapOffset: asBuiltMapOffset,
+            }),
+            contentType: "image/svg+xml",
+          })
+        : await createPdfAttachment({
+            filename: `as-built-${Date.now()}.pdf`,
+            html: buildAsBuiltPdfHtml({
+              fieldRows: asBuiltFieldRows,
+              planSvg,
+              mapImageBase64,
+              mapScale: asBuiltMapScale,
+              mapOffset: asBuiltMapOffset,
+              mapRotation: asBuiltMapRotation,
+              boardSize: asBuiltBoardSize,
+            }),
+          });
       const subject = `As-Built plan - ${asBuiltAddress.trim()}`;
       const message = buildFiledEmail({
         title: "As-Built Plan",
