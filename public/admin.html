@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111111" />
+    <title>WDL Office Dashboard</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Williams Drainage Limited</p>
+        <h1>Office Dashboard</h1>
+      </div>
+      <div class="topbar-actions">
+        <input
+          id="accessCode"
+          type="password"
+          autocomplete="current-password"
+          placeholder="Dashboard access code"
+        />
+        <button id="saveAccessCode" type="button">Save</button>
+        <button id="refreshDashboard" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="metrics">
+        <article>
+          <span id="reportCount">0</span>
+          <p>Filed forms</p>
+        </article>
+        <article>
+          <span id="purchaseCount">0</span>
+          <p>PO requests</p>
+        </article>
+        <article>
+          <span id="hazardCount">0</span>
+          <p>Hazard IDs</p>
+        </article>
+        <article>
+          <span id="jobCount">0</span>
+          <p>Jobs</p>
+        </article>
+      </section>
+
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="active" data-tab="reports" type="button">Reports</button>
+        <button data-tab="purchase" type="button">Purchase Orders</button>
+        <button data-tab="calendar" type="button">Calendar</button>
+        <button data-tab="jobs" type="button">Jobs</button>
+      </nav>
+
+      <section id="reports" class="panel active">
+        <div class="panel-heading">
+          <div>
+            <h2>Filed Forms</h2>
+            <p>Search every submitted form and open a printable copy.</p>
+          </div>
+          <div class="filters">
+            <input id="reportSearch" type="search" placeholder="Search forms" />
+            <select id="reportTypeFilter">
+              <option value="">All types</option>
+              <option>Prestart Checklist</option>
+              <option>Incident Report</option>
+              <option>Purchase Order Request</option>
+              <option>Job Variation Request</option>
+              <option>Hazard ID</option>
+              <option>As-Built Plan</option>
+            </select>
+          </div>
+        </div>
+        <div id="reportsList" class="list"></div>
+      </section>
+
+      <section id="purchase" class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Purchase Order Requests</h2>
+            <p>Record the Xero PO number and mark the request as issued.</p>
+          </div>
+        </div>
+        <div id="purchaseList" class="list"></div>
+      </section>
+
+      <section id="calendar" class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Weekly Hazard ID Sign-Ons</h2>
+            <p>Shows who signed on to each job from submitted Hazard IDs.</p>
+          </div>
+          <label>
+            Week starting
+            <input id="calendarWeek" type="date" />
+          </label>
+        </div>
+        <div id="calendarGrid" class="calendar"></div>
+      </section>
+
+      <section id="jobs" class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Jobs</h2>
+            <p>Add jobs here and they become available in the field app.</p>
+          </div>
+        </div>
+        <form id="jobForm" class="job-form">
+          <input id="jobNumber" inputmode="numeric" placeholder="Job number" />
+          <input id="jobName" placeholder="Job name / site" />
+          <button type="submit">Add Job</button>
+        </form>
+        <div id="jobsList" class="jobs"></div>
+      </section>
+    </main>
+
+    <aside id="reportDrawer" class="drawer" aria-hidden="true">
+      <div class="drawer-card">
+        <button id="closeDrawer" class="icon-button" type="button">Close</button>
+        <div id="reportDetail"></div>
+      </div>
+    </aside>
+
+    <template id="emptyTemplate">
+      <div class="empty">Nothing to show yet.</div>
+    </template>
+
+    <script src="/admin.js" defer></script>
+  </body>
+</html>

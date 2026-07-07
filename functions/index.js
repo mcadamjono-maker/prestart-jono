@@ -172,6 +172,231 @@ const normaliseAttachments = (attachments = []) => {
   });
 };
 
+const toPlainObject = (value) =>
+  value && typeof value === "object" && !Array.isArray(value) ? value : {};
+
+const toSearchText = (...values) =>
+  values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value.map((item) => JSON.stringify(item));
+      if (value && typeof value === "object") return JSON.stringify(value);
+      return String(value || "");
+    })
+    .join(" ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 12000);
+
+const getStringField = (fields, keys) => {
+  for (const key of keys) {
+    const value = fields?.[key];
+
+    if (value !== undefined && value !== null && String(value).trim()) {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+};
+
+const getReportStatus = (reportType, fields = {}) => {
+  const heading = formatReportHeading(reportType).toLowerCase();
+
+  if (heading === "purchase order request") {
+    return getStringField(fields, ["status"]) || "Pending";
+  }
+
+  if (heading === "hazard id") return "Active";
+
+  return "Filed";
+};
+
+const getWeekStartIso = (date = new Date()) => {
+  const weekDate = new Date(date);
+  const day = weekDate.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  weekDate.setHours(0, 0, 0, 0);
+  weekDate.setDate(weekDate.getDate() + diffToMonday);
+
+  return weekDate.toISOString().slice(0, 10);
+};
+
+const parseSignedAtDate = (signedAt, fallbackDate = new Date()) => {
+  const parsedDate = new Date(String(signedAt || ""));
+
+  if (!Number.isNaN(parsedDate.getTime())) return parsedDate;
+
+  return fallbackDate;
+};
+
+const normaliseSignOns = (formData = {}, fields = {}, submittedAt = new Date()) => {
+  if (Array.isArray(formData.signOns)) {
+    return formData.signOns
+      .map((signOn) => {
+        const name = String(signOn?.name || "").trim();
+        const signedAt = String(signOn?.signedAt || "").trim();
+        const signedDate = parseSignedAtDate(signedAt, submittedAt);
+
+        if (!name) return null;
+
+        return {
+          name,
+          signedAt: signedAt || submittedAt.toISOString(),
+          date: signedDate.toISOString().slice(0, 10),
+          weekStart: getWeekStartIso(signedDate),
+          signatureCaptured: Boolean(signOn?.signatureCaptured),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  const summary = String(fields.signed_on_workers || "");
+
+  if (!summary || summary.toLowerCase().includes("no workers")) return [];
+
+  return summary
+    .split(/\n+/)
+    .map((line) => {
+      const match = line.match(/^\s*\d+\.\s*(.*?)\s+-\s+(.*?)\s+-/);
+
+      if (!match) return null;
+
+      const signedDate = parseSignedAtDate(match[2], submittedAt);
+
+      return {
+        name: match[1].trim(),
+        signedAt: match[2].trim(),
+        date: signedDate.toISOString().slice(0, 10),
+        weekStart: getWeekStartIso(signedDate),
+        signatureCaptured: true,
+      };
+    })
+    .filter(Boolean);
+};
+
+const buildStoredReport = ({
+  reportType,
+  subject,
+  message,
+  recipientEmail,
+  fields,
+  formData,
+  attachments,
+}) => {
+  const now = new Date();
+  const safeFields = toPlainObject(fields);
+  const safeFormData = toPlainObject(formData);
+  const heading = formatReportHeading(reportType);
+  const jobNumber = getStringField(safeFields, [
+    "job_number",
+    "machine",
+    "template",
+  ]);
+  const jobName = getStringField(safeFields, [
+    "job_name",
+    "site_address",
+    "address",
+    "incident_location",
+  ]);
+  const signOns = normaliseSignOns(safeFormData, safeFields, now);
+
+  return {
+    reportType: heading,
+    subject,
+    message,
+    recipientEmail,
+    fields: safeFields,
+    formData: safeFormData,
+    status: getReportStatus(reportType, safeFields),
+    jobNumber,
+    jobName,
+    siteAddress: getStringField(safeFields, ["site_address", "address"]),
+    requestedBy: getStringField(safeFields, [
+      "requested_by",
+      "operator",
+      "prepared_by",
+      "incident_reporter",
+    ]),
+    supplier: getStringField(safeFields, ["supplier"]),
+    purchaseOrderNumber: getStringField(safeFields, [
+      "purchase_order_number",
+      "po_number",
+    ]),
+    attachmentSummary: attachments.map((attachment) => ({
+      filename: attachment.filename,
+      contentType: attachment.contentType,
+    })),
+    signOns,
+    submittedAt: admin.firestore.Timestamp.fromDate(now),
+    submittedAtIso: now.toISOString(),
+    weekStart:
+      getStringField(safeFields, ["week_start"]) ||
+      safeFormData.weekStart ||
+      signOns[0]?.weekStart ||
+      getWeekStartIso(now),
+    searchText: toSearchText(
+      heading,
+      subject,
+      message,
+      safeFields,
+      safeFormData,
+      signOns
+    ),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+};
+
+const publicReport = (doc) => {
+  const data = doc.data() || {};
+
+  return {
+    id: doc.id,
+    reportType: data.reportType || "",
+    subject: data.subject || "",
+    message: data.message || "",
+    fields: data.fields || {},
+    formData: data.formData || {},
+    status: data.status || "Filed",
+    jobNumber: data.jobNumber || "",
+    jobName: data.jobName || "",
+    siteAddress: data.siteAddress || "",
+    requestedBy: data.requestedBy || "",
+    supplier: data.supplier || "",
+    purchaseOrderNumber: data.purchaseOrderNumber || "",
+    adminNote: data.adminNote || "",
+    attachmentSummary: data.attachmentSummary || [],
+    signOns: data.signOns || [],
+    submittedAtIso: data.submittedAtIso || "",
+    weekStart: data.weekStart || "",
+  };
+};
+
+const getDashboardAccessCode = () =>
+  String(process.env.DASHBOARD_ACCESS_CODE || "").trim();
+
+const assertDashboardAccess = (request) => {
+  const accessCode = getDashboardAccessCode();
+
+  if (!accessCode) return;
+
+  const suppliedCode = String(
+    request.get("x-dashboard-code") ||
+      request.query?.accessCode ||
+      request.body?.accessCode ||
+      ""
+  ).trim();
+
+  if (suppliedCode !== accessCode) {
+    const error = new Error("Dashboard access code is not valid.");
+
+    error.statusCode = 401;
+    throw error;
+  }
+};
+
 const smtpHost = process.env.MAILEROO_SMTP_HOST || DEFAULT_SMTP_HOST;
 const smtpPort = Number(process.env.MAILEROO_SMTP_PORT || 587);
 const smtpUser = (process.env.MAILEROO_SMTP_USER || "").trim();
@@ -232,6 +457,8 @@ exports.sendReport = onRequest(
       });
 
       const attachments = normaliseAttachments(request.body?.attachments);
+      const fields = toPlainObject(request.body?.fields);
+      const formData = toPlainObject(request.body?.formData);
 
       const emailResult = await transporter.sendMail({
         from: smtpFrom,
@@ -242,10 +469,22 @@ exports.sendReport = onRequest(
         html: buildReportHtml({ reportType, subject, message }),
         attachments,
       });
+      const reportRef = await getFirestore().collection("reports").add(
+        buildStoredReport({
+          reportType,
+          subject,
+          message,
+          recipientEmail,
+          fields,
+          formData,
+          attachments,
+        })
+      );
 
       response.status(200).json({
         ok: true,
         id: emailResult.messageId || null,
+        reportId: reportRef.id,
       });
     } catch (error) {
       console.error("sendReport failed", {
@@ -328,6 +567,188 @@ exports.jobs = onRequest(
       console.error("jobs failed", { message: error.message });
       response.status(500).json({
         error: error.message || "Unable to update jobs.",
+      });
+    }
+  }
+);
+
+exports.dashboard = onRequest(
+  {
+    region: "australia-southeast1",
+    cors: true,
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+  async (request, response) => {
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    try {
+      assertDashboardAccess(request);
+
+      const db = getFirestore();
+      const reportsCollection = db.collection("reports");
+      const resource = String(
+        request.query?.resource || request.body?.resource || "summary"
+      );
+
+      if (request.method === "GET") {
+        if (resource === "summary") {
+          const [reportsSnapshot, jobsSnapshot] = await Promise.all([
+            reportsCollection.orderBy("submittedAt", "desc").limit(120).get(),
+            db.collection("jobs").orderBy("number").get(),
+          ]);
+          const reports = reportsSnapshot.docs.map(publicReport);
+          const purchaseRequests = reports.filter(
+            (report) => report.reportType === "Purchase Order Request"
+          );
+          const hazardReports = reports.filter(
+            (report) => report.reportType === "Hazard ID"
+          );
+
+          response.status(200).json({
+            ok: true,
+            jobs: jobsSnapshot.docs.map(formatJob).filter((job) => job.name),
+            reports,
+            purchaseRequests,
+            hazardReports,
+          });
+          return;
+        }
+
+        if (resource === "reports") {
+          const search = String(request.query?.search || "").toLowerCase().trim();
+          const type = String(request.query?.type || "").trim();
+          const limit = Math.min(Number(request.query?.limit || 120), 250);
+          const snapshot = await reportsCollection
+            .orderBy("submittedAt", "desc")
+            .limit(limit)
+            .get();
+          let reports = snapshot.docs.map(publicReport);
+
+          if (type) {
+            reports = reports.filter((report) => report.reportType === type);
+          }
+
+          if (search) {
+            reports = reports.filter((report) =>
+              toSearchText(
+                report.reportType,
+                report.subject,
+                report.message,
+                report.fields,
+                report.formData,
+                report.signOns
+              ).includes(search)
+            );
+          }
+
+          response.status(200).json({ ok: true, reports });
+          return;
+        }
+
+        if (resource === "calendar") {
+          const weekStart = String(
+            request.query?.weekStart || getWeekStartIso(new Date())
+          ).slice(0, 10);
+          const snapshot = await reportsCollection
+            .where("reportType", "==", "Hazard ID")
+            .where("weekStart", "==", weekStart)
+            .limit(200)
+            .get();
+          const entries = [];
+
+          snapshot.docs.forEach((doc) => {
+            const report = publicReport(doc);
+
+            (report.signOns || []).forEach((signOn) => {
+              entries.push({
+                reportId: report.id,
+                jobName: report.jobName || report.siteAddress || report.subject,
+                siteAddress: report.siteAddress,
+                taskDescription: report.formData?.taskDescription || "",
+                name: signOn.name,
+                date: signOn.date,
+                signedAt: signOn.signedAt,
+              });
+            });
+          });
+
+          response.status(200).json({ ok: true, weekStart, entries });
+          return;
+        }
+
+        response.status(400).json({ error: "Unknown dashboard resource." });
+        return;
+      }
+
+      if (request.method === "POST") {
+        const action = String(request.body?.action || "");
+
+        if (action === "addJob") {
+          const jobNumber = normaliseJobNumber(request.body?.number);
+          const jobName = normaliseJobName(request.body?.name);
+
+          if (!jobNumber || !jobName) {
+            response
+              .status(400)
+              .json({ error: "Job number and job name are required." });
+            return;
+          }
+
+          await db.collection("jobs").doc(jobNumber).set(
+            {
+              number: jobNumber,
+              name: jobName,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          response.status(200).json({
+            ok: true,
+            job: { number: jobNumber, name: jobName },
+          });
+          return;
+        }
+
+        if (action === "updatePurchase") {
+          const reportId = String(request.body?.reportId || "").trim();
+          const status = String(request.body?.status || "Pending").trim();
+          const poNumber = String(request.body?.poNumber || "").trim();
+          const adminNote = String(request.body?.adminNote || "").trim();
+
+          if (!reportId) {
+            response.status(400).json({ error: "Report ID is required." });
+            return;
+          }
+
+          await reportsCollection.doc(reportId).set(
+            {
+              status,
+              purchaseOrderNumber: poNumber,
+              adminNote,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          response.status(200).json({ ok: true });
+          return;
+        }
+
+        response.status(400).json({ error: "Unknown dashboard action." });
+        return;
+      }
+
+      response.status(405).json({ error: "GET or POST required." });
+    } catch (error) {
+      console.error("dashboard failed", { message: error.message });
+      response.status(error.statusCode || 500).json({
+        error: error.message || "Dashboard request failed.",
       });
     }
   }

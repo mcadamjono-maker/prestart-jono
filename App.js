@@ -448,6 +448,17 @@ const getSubmittedAt = () =>
     timeStyle: "short",
   });
 
+const getCurrentWeekStartIso = () => {
+  const weekDate = new Date();
+  const day = weekDate.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  weekDate.setHours(0, 0, 0, 0);
+  weekDate.setDate(weekDate.getDate() + diffToMonday);
+
+  return weekDate.toISOString().slice(0, 10);
+};
+
 const formatFieldValue = (value, fallback = "Not supplied") => {
   const cleanedValue = String(value || "").trim();
 
@@ -1791,6 +1802,9 @@ export default function App() {
   const [variationMaterialsQuantity, setVariationMaterialsQuantity] =
     useState("");
   const [variationPhotos, setVariationPhotos] = useState([]);
+  const [selectedHazardJob, setSelectedHazardJob] = useState("");
+  const [isHazardJobDropdownOpen, setIsHazardJobDropdownOpen] =
+    useState(false);
   const [hazardSiteAddress, setHazardSiteAddress] = useState("");
   const [hazardTaskDescription, setHazardTaskDescription] = useState("");
   const [hazardPreparedBy, setHazardPreparedBy] = useState("");
@@ -1872,6 +1886,9 @@ export default function App() {
   );
   const selectedVariationJobOption = jobOptions.find(
     (job) => job.number === selectedVariationJob
+  );
+  const selectedHazardJobOption = jobOptions.find(
+    (job) => job.number === selectedHazardJob
   );
   const asBuiltMapImageUrl = useMemo(
     () => createAsBuiltMapUrl(asBuiltAddress, FIREBASE_STATIC_MAP_ENDPOINT),
@@ -2442,6 +2459,8 @@ export default function App() {
   };
 
   const resetHazardForm = () => {
+    setSelectedHazardJob("");
+    setIsHazardJobDropdownOpen(false);
     setHazardSiteAddress("");
     setHazardTaskDescription("");
     setHazardPreparedBy("");
@@ -2677,6 +2696,7 @@ export default function App() {
     subject,
     message,
     fields = {},
+    formData = {},
     photoList = [],
     photoFilenamePrefix = "report-photo",
     extraAttachments = [],
@@ -2702,6 +2722,7 @@ export default function App() {
         subject,
         message,
         fields,
+        formData,
         attachments: [...attachments, ...extraAttachments],
       }),
     });
@@ -3963,6 +3984,11 @@ export default function App() {
   };
 
   const submitHazardId = async () => {
+    if (!selectedHazardJob) {
+      Alert.alert("Validation", "Please select the job for this Hazard ID.");
+      return;
+    }
+
     if (!hazardPreparedBy.trim()) {
       Alert.alert("Validation", "Please enter who prepared the Hazard ID.");
       return;
@@ -3986,14 +4012,18 @@ export default function App() {
       const selectedYardChecks = getSelectedLabels(hazardYardChecks);
       const selectedSiteChecks = getSelectedLabels(hazardSiteChecks);
       const selectedControls = getSelectedLabels(hazardControls);
+      const hazardWeekStart = getCurrentWeekStartIso();
       const subject = `Hazard ID - ${hazardSiteAddress.trim()}`;
       const message = buildFiledEmail({
         title: "Hazard Identification Worksheet",
-        reference: hazardSiteAddress.trim(),
+        reference: selectedHazardJobOption?.name || selectedHazardJob,
         sections: [
           {
             title: "Task Details",
             rows: [
+              ["Job Name", selectedHazardJobOption?.name],
+              ["Job Number", selectedHazardJob],
+              ["Week Starting", hazardWeekStart],
               ["Site Address", hazardSiteAddress.trim()],
               ["Task Description", hazardTaskDescription.trim()],
               ["Prepared By", hazardPreparedBy.trim()],
@@ -4029,6 +4059,9 @@ export default function App() {
       const hazardFields = {
         report_type: "Hazard Identification Worksheet",
         template: "hazard_id",
+        job_number: selectedHazardJob,
+        job_name: selectedHazardJobOption?.name || "",
+        week_start: hazardWeekStart,
         site_address: hazardSiteAddress.trim(),
         task_description: hazardTaskDescription.trim(),
         prepared_by: hazardPreparedBy.trim(),
@@ -4042,6 +4075,21 @@ export default function App() {
         subject,
         message,
         fields: hazardFields,
+        formData: {
+          jobNumber: selectedHazardJob,
+          jobName: selectedHazardJobOption?.name || "",
+          weekStart: hazardWeekStart,
+          siteAddress: hazardSiteAddress.trim(),
+          taskDescription: hazardTaskDescription.trim(),
+          preparedBy: hazardPreparedBy.trim(),
+          startDate: hazardStartDate.trim(),
+          finishDate: hazardFinishDate.trim(),
+          signOns: hazardSignOns.map((signOn) => ({
+            name: signOn.name,
+            signedAt: signOn.signedAt,
+            signatureCaptured: true,
+          })),
+        },
       });
 
       if (sentByFirebase) {
@@ -4940,6 +4988,17 @@ export default function App() {
               </View>
 
               <View style={styles.card}>
+                <Text style={styles.inputLabel}>Job</Text>
+                <StableJobSelect
+                  selectedJobNumber={selectedHazardJob}
+                  selectedJobOption={selectedHazardJobOption}
+                  isOpen={isHazardJobDropdownOpen}
+                  setIsOpen={setIsHazardJobDropdownOpen}
+                  onSelectJob={setSelectedHazardJob}
+                  jobOptions={jobOptions}
+                  isSubmitting={isSubmitting}
+                />
+
                 <DraftTextInput
                   placeholder="Site Address"
                   placeholderTextColor="#8a8a8a"
