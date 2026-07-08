@@ -223,6 +223,32 @@ const getWeekStartIso = (date = new Date()) => {
   return weekDate.toISOString().slice(0, 10);
 };
 
+const normaliseWeekStart = (weekStart) => {
+  const cleanedWeekStart = String(weekStart || "").trim().slice(0, 10);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cleanedWeekStart)) {
+    return cleanedWeekStart;
+  }
+
+  return getWeekStartIso(new Date());
+};
+
+const buildHazardDraftId = (jobNumber, weekStart) =>
+  `${normaliseWeekStart(weekStart)}_${normaliseJobNumber(jobNumber)}`;
+
+const normaliseStringMap = (value = {}) => {
+  const source = toPlainObject(value);
+  const output = {};
+
+  Object.keys(source)
+    .slice(0, 80)
+    .forEach((key) => {
+      output[String(key).slice(0, 160)] = Boolean(source[key]);
+    });
+
+  return output;
+};
+
 const parseSignedAtDate = (signedAt, fallbackDate = new Date()) => {
   const parsedDate = new Date(String(signedAt || ""));
 
@@ -274,6 +300,164 @@ const normaliseSignOns = (formData = {}, fields = {}, submittedAt = new Date()) 
       };
     })
     .filter(Boolean);
+};
+
+const normaliseHazardDraftSignOns = (signOns = [], submittedAt = new Date()) => {
+  if (!Array.isArray(signOns)) return [];
+
+  return signOns
+    .slice(0, 250)
+    .map((signOn) => {
+      const name = String(signOn?.name || "").trim().slice(0, 120);
+      const signedAt = String(signOn?.signedAt || "").trim();
+      const signedDate = parseSignedAtDate(signedAt, submittedAt);
+      const signatureStrokes = Array.isArray(signOn?.signatureStrokes)
+        ? signOn.signatureStrokes.slice(0, 20).map((stroke) =>
+            Array.isArray(stroke)
+              ? stroke.slice(0, 220).map((point) => ({
+                  x: Number(point?.x) || 0,
+                  y: Number(point?.y) || 0,
+                }))
+              : []
+          )
+        : [];
+
+      if (!name) return null;
+
+      return {
+        name,
+        signedAt: signedAt || submittedAt.toISOString(),
+        date: signedDate.toISOString().slice(0, 10),
+        weekStart: getWeekStartIso(signedDate),
+        signatureCaptured: signatureStrokes.length > 0,
+        signatureStrokesJson: JSON.stringify(signatureStrokes).slice(0, 60000),
+      };
+    })
+    .filter(Boolean);
+};
+
+const publicHazardSignOns = (signOns = []) =>
+  Array.isArray(signOns)
+    ? signOns.map((signOn) => {
+        let signatureStrokes = [];
+
+        try {
+          signatureStrokes = JSON.parse(signOn.signatureStrokesJson || "[]");
+        } catch {
+          signatureStrokes = [];
+        }
+
+        return {
+          name: signOn.name || "",
+          signedAt: signOn.signedAt || "",
+          date: signOn.date || "",
+          weekStart: signOn.weekStart || "",
+          signatureCaptured: Boolean(signOn.signatureCaptured),
+          signatureStrokes,
+        };
+      })
+    : [];
+
+const buildHazardDraft = (body = {}) => {
+  const now = new Date();
+  const jobNumber = normaliseJobNumber(body.jobNumber);
+  const jobName = normaliseJobName(body.jobName);
+  const weekStart = normaliseWeekStart(body.weekStart);
+  const signOns = normaliseHazardDraftSignOns(body.signOns, now);
+
+  if (!jobNumber) {
+    throw new Error("Job number is required.");
+  }
+
+  if (!jobName) {
+    throw new Error("Job name is required.");
+  }
+
+  return {
+    reportType: "Hazard ID",
+    status: "Active Draft",
+    jobNumber,
+    jobName,
+    weekStart,
+    siteAddress: String(body.siteAddress || "").trim().slice(0, 180),
+    taskDescription: String(body.taskDescription || "").trim().slice(0, 500),
+    preparedBy: String(body.preparedBy || "").trim().slice(0, 120),
+    startDate: String(body.startDate || "").trim().slice(0, 80),
+    finishDate: String(body.finishDate || "").trim().slice(0, 80),
+    yardChecks: normaliseStringMap(body.yardChecks),
+    siteChecks: normaliseStringMap(body.siteChecks),
+    risks: String(body.risks || "").trim().slice(0, 2500),
+    controls: normaliseStringMap(body.controls),
+    extraControls: String(body.extraControls || "").trim().slice(0, 2500),
+    toolboxMeeting: String(body.toolboxMeeting || "").trim().slice(0, 2500),
+    signOffNotes: String(body.signOffNotes || "").trim().slice(0, 2500),
+    signOns,
+    searchText: toSearchText(
+      "Hazard ID",
+      jobNumber,
+      jobName,
+      body.siteAddress,
+      body.taskDescription,
+      body.preparedBy,
+      signOns
+    ),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAtIso: now.toISOString(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+};
+
+const publicHazardDraft = (doc) => {
+  const data = doc.data() || {};
+  const signOns = publicHazardSignOns(data.signOns || []);
+
+  return {
+    id: doc.id,
+    reportType: "Hazard ID",
+    subject: `Hazard ID Draft - ${data.jobName || data.jobNumber || doc.id}`,
+    message: "Active weekly Hazard ID draft.",
+    fields: {
+      job_number: data.jobNumber || "",
+      job_name: data.jobName || "",
+      week_start: data.weekStart || "",
+      site_address: data.siteAddress || "",
+      task_description: data.taskDescription || "",
+      prepared_by: data.preparedBy || "",
+    },
+    formData: {
+      jobNumber: data.jobNumber || "",
+      jobName: data.jobName || "",
+      weekStart: data.weekStart || "",
+      siteAddress: data.siteAddress || "",
+      taskDescription: data.taskDescription || "",
+      preparedBy: data.preparedBy || "",
+      startDate: data.startDate || "",
+      finishDate: data.finishDate || "",
+      yardChecks: data.yardChecks || {},
+      siteChecks: data.siteChecks || {},
+      risks: data.risks || "",
+      controls: data.controls || {},
+      extraControls: data.extraControls || "",
+      toolboxMeeting: data.toolboxMeeting || "",
+      signOffNotes: data.signOffNotes || "",
+      signOns,
+    },
+    status: data.status || "Active Draft",
+    jobNumber: data.jobNumber || "",
+    jobName: data.jobName || "",
+    siteAddress: data.siteAddress || "",
+    requestedBy: data.preparedBy || "",
+    yardChecks: data.yardChecks || {},
+    siteChecks: data.siteChecks || {},
+    risks: data.risks || "",
+    controls: data.controls || {},
+    extraControls: data.extraControls || "",
+    toolboxMeeting: data.toolboxMeeting || "",
+    signOffNotes: data.signOffNotes || "",
+    signOns,
+    submittedAtIso: data.updatedAtIso || "",
+    weekStart: data.weekStart || "",
+  };
 };
 
 const buildStoredReport = ({
@@ -572,6 +756,92 @@ exports.jobs = onRequest(
   }
 );
 
+exports.hazardId = onRequest(
+  {
+    region: "australia-southeast1",
+    cors: true,
+    memory: "256MiB",
+    timeoutSeconds: 30,
+  },
+  async (request, response) => {
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    try {
+      const db = getFirestore();
+      const hazardCollection = db.collection("hazardIds");
+
+      if (request.method === "GET") {
+        const jobNumber = normaliseJobNumber(request.query?.jobNumber);
+        const weekStart = normaliseWeekStart(request.query?.weekStart);
+
+        if (jobNumber) {
+          const doc = await hazardCollection
+            .doc(buildHazardDraftId(jobNumber, weekStart))
+            .get();
+
+          response.status(200).json({
+            ok: true,
+            draft: doc.exists ? publicHazardDraft(doc) : null,
+          });
+          return;
+        }
+
+        const snapshot = await hazardCollection
+          .where("weekStart", "==", weekStart)
+          .limit(200)
+          .get();
+
+        response.status(200).json({
+          ok: true,
+          drafts: snapshot.docs.map(publicHazardDraft),
+        });
+        return;
+      }
+
+      if (request.method === "POST") {
+        const action = String(request.body?.action || "save");
+        const jobNumber = normaliseJobNumber(request.body?.jobNumber);
+        const weekStart = normaliseWeekStart(request.body?.weekStart);
+
+        if (!jobNumber) {
+          response.status(400).json({ error: "Job number is required." });
+          return;
+        }
+
+        const docRef = hazardCollection.doc(
+          buildHazardDraftId(jobNumber, weekStart)
+        );
+
+        if (action === "delete" || action === "submitted") {
+          await docRef.delete();
+          response.status(200).json({ ok: true });
+          return;
+        }
+
+        const draft = buildHazardDraft(request.body);
+
+        await docRef.set(draft, { merge: true });
+
+        response.status(200).json({
+          ok: true,
+          draft: publicHazardDraft(await docRef.get()),
+        });
+        return;
+      }
+
+      response.status(405).json({ error: "GET or POST required." });
+    } catch (error) {
+      console.error("hazardId failed", { message: error.message });
+      response.status(500).json({
+        error: error.message || "Unable to update the Hazard ID.",
+      });
+    }
+  }
+);
+
 exports.dashboard = onRequest(
   {
     region: "australia-southeast1",
@@ -596,17 +866,25 @@ exports.dashboard = onRequest(
 
       if (request.method === "GET") {
         if (resource === "summary") {
-          const [reportsSnapshot, jobsSnapshot] = await Promise.all([
+          const currentWeekStart = getWeekStartIso(new Date());
+          const [reportsSnapshot, jobsSnapshot, hazardDraftsSnapshot] =
+            await Promise.all([
             reportsCollection.orderBy("submittedAt", "desc").limit(120).get(),
             db.collection("jobs").orderBy("number").get(),
+            db
+              .collection("hazardIds")
+              .where("weekStart", "==", currentWeekStart)
+              .limit(200)
+              .get(),
           ]);
           const reports = reportsSnapshot.docs.map(publicReport);
           const purchaseRequests = reports.filter(
             (report) => report.reportType === "Purchase Order Request"
           );
-          const hazardReports = reports.filter(
-            (report) => report.reportType === "Hazard ID"
-          );
+          const hazardReports = [
+            ...hazardDraftsSnapshot.docs.map(publicHazardDraft),
+            ...reports.filter((report) => report.reportType === "Hazard ID"),
+          ];
 
           response.status(200).json({
             ok: true,
@@ -653,16 +931,25 @@ exports.dashboard = onRequest(
           const weekStart = String(
             request.query?.weekStart || getWeekStartIso(new Date())
           ).slice(0, 10);
-          const snapshot = await reportsCollection
-            .where("reportType", "==", "Hazard ID")
-            .where("weekStart", "==", weekStart)
-            .limit(200)
-            .get();
+          const [reportsSnapshot, draftsSnapshot] = await Promise.all([
+            reportsCollection
+              .where("reportType", "==", "Hazard ID")
+              .where("weekStart", "==", weekStart)
+              .limit(200)
+              .get(),
+            db
+              .collection("hazardIds")
+              .where("weekStart", "==", weekStart)
+              .limit(200)
+              .get(),
+          ]);
           const entries = [];
+          const hazardDocs = [
+            ...draftsSnapshot.docs.map(publicHazardDraft),
+            ...reportsSnapshot.docs.map(publicReport),
+          ];
 
-          snapshot.docs.forEach((doc) => {
-            const report = publicReport(doc);
-
+          hazardDocs.forEach((report) => {
             (report.signOns || []).forEach((signOn) => {
               entries.push({
                 reportId: report.id,

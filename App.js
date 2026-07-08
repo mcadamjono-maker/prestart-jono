@@ -203,6 +203,11 @@ const DEFAULT_FIREBASE_JOBS_ENDPOINT =
 const FIREBASE_JOBS_ENDPOINT =
   process.env.EXPO_PUBLIC_FIREBASE_JOBS_ENDPOINT ||
   DEFAULT_FIREBASE_JOBS_ENDPOINT;
+const DEFAULT_FIREBASE_HAZARD_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/hazardId";
+const FIREBASE_HAZARD_ENDPOINT =
+  process.env.EXPO_PUBLIC_FIREBASE_HAZARD_ENDPOINT ||
+  DEFAULT_FIREBASE_HAZARD_ENDPOINT;
 const MAX_REPORT_ATTACHMENT_BYTES = 28 * 1024 * 1024;
 const SETTINGS_STORAGE_KEY = "williams-field-forms-settings";
 const PRESTART_STORAGE_PREFIX = "williams-prestart-values";
@@ -1823,6 +1828,10 @@ export default function App() {
   const [hasHazardSignOnConfirmed, setHasHazardSignOnConfirmed] =
     useState(false);
   const [hazardSignatureStrokes, setHazardSignatureStrokes] = useState([]);
+  const [hazardDraftStatus, setHazardDraftStatus] = useState("");
+  const [hazardLastSavedAt, setHazardLastSavedAt] = useState("");
+  const [isHazardDraftLoading, setIsHazardDraftLoading] = useState(false);
+  const [isHazardDraftSaving, setIsHazardDraftSaving] = useState(false);
   const [signaturePadSize, setSignaturePadSize] = useState({
     width: 1,
     height: 1,
@@ -1875,6 +1884,9 @@ export default function App() {
   const asBuiltLineStartRef = useRef(null);
   const currentAsBuiltLineRef = useRef(null);
   const asBuiltMapGestureRef = useRef(null);
+  const hazardDraftLoadRef = useRef(0);
+  const hazardDraftSaveTimerRef = useRef(null);
+  const isHydratingHazardDraftRef = useRef(false);
 
   const checklist = CHECKLIST_TEMPLATES[selectedTemplate];
   const machineFieldLabel =
@@ -2458,9 +2470,11 @@ export default function App() {
     setIsVariationJobDropdownOpen(false);
   };
 
-  const resetHazardForm = () => {
-    setSelectedHazardJob("");
-    setIsHazardJobDropdownOpen(false);
+  const resetHazardForm = ({ keepJob = false } = {}) => {
+    if (!keepJob) {
+      setSelectedHazardJob("");
+      setIsHazardJobDropdownOpen(false);
+    }
     setHazardSiteAddress("");
     setHazardTaskDescription("");
     setHazardPreparedBy("");
@@ -2478,6 +2492,8 @@ export default function App() {
     setHazardSignOnName("");
     setHasHazardSignOnConfirmed(false);
     setHazardSignatureStrokes([]);
+    setHazardDraftStatus(keepJob ? "No saved Hazard ID for this job yet." : "");
+    setHazardLastSavedAt("");
   };
 
   const resetAsBuiltForm = () => {
@@ -2736,6 +2752,260 @@ export default function App() {
 
     return true;
   };
+
+  const buildHazardDraftPayload = () => ({
+    jobNumber: selectedHazardJob,
+    jobName: selectedHazardJobOption?.name || selectedHazardJob,
+    weekStart: getCurrentWeekStartIso(),
+    siteAddress: hazardSiteAddress.trim(),
+    taskDescription: hazardTaskDescription.trim(),
+    preparedBy: hazardPreparedBy.trim(),
+    startDate: hazardStartDate.trim(),
+    finishDate: hazardFinishDate.trim(),
+    yardChecks: hazardYardChecks,
+    siteChecks: hazardSiteChecks,
+    risks: hazardRisks.trim(),
+    controls: hazardControls,
+    extraControls: hazardExtraControls.trim(),
+    toolboxMeeting: hazardToolboxMeeting.trim(),
+    signOffNotes: hazardSignOffNotes.trim(),
+    signOns: hazardSignOns,
+  });
+
+  const hasHazardDraftContent = (payload) =>
+    Boolean(
+      payload.siteAddress ||
+        payload.taskDescription ||
+        payload.preparedBy ||
+        payload.startDate ||
+        payload.finishDate ||
+        payload.risks ||
+        payload.extraControls ||
+        payload.toolboxMeeting ||
+        payload.signOffNotes ||
+        payload.signOns.length > 0 ||
+        Object.values(payload.yardChecks).some(Boolean) ||
+        Object.values(payload.siteChecks).some(Boolean) ||
+        Object.values(payload.controls).some(Boolean)
+    );
+
+  const hydrateHazardDraft = (draft) => {
+    const formData = draft?.formData || {};
+    const fields = draft?.fields || {};
+
+    isHydratingHazardDraftRef.current = true;
+    setHazardSiteAddress(draft?.siteAddress || formData.siteAddress || fields.site_address || "");
+    setHazardTaskDescription(
+      formData.taskDescription || fields.task_description || ""
+    );
+    setHazardPreparedBy(formData.preparedBy || fields.prepared_by || "");
+    setHazardStartDate(formData.startDate || "");
+    setHazardFinishDate(formData.finishDate || "");
+    setHazardYardChecks(draft?.yardChecks || {});
+    setHazardSiteChecks(draft?.siteChecks || {});
+    setHazardRisks(draft?.risks || "");
+    setHazardControls(draft?.controls || {});
+    setHazardExtraControls(draft?.extraControls || "");
+    setHazardToolboxMeeting(draft?.toolboxMeeting || "");
+    setHazardSignOffNotes(draft?.signOffNotes || "");
+    setHazardSignOns(
+      Array.isArray(draft?.signOns)
+        ? draft.signOns.map((signOn) => ({
+            name: signOn.name || "",
+            signedAt: signOn.signedAt || "",
+            signatureStrokes: Array.isArray(signOn.signatureStrokes)
+              ? signOn.signatureStrokes
+              : [],
+          }))
+        : []
+    );
+    setIsHazardSignOnOpen(false);
+    setHazardSignOnName("");
+    setHasHazardSignOnConfirmed(false);
+    setHazardSignatureStrokes([]);
+    setHazardLastSavedAt(draft?.submittedAtIso || "");
+    setHazardDraftStatus("Loaded this week's saved Hazard ID.");
+    setTimeout(() => {
+      isHydratingHazardDraftRef.current = false;
+    }, 0);
+  };
+
+  const saveHazardDraft = async ({ quiet = false } = {}) => {
+    if (!selectedHazardJob || !FIREBASE_HAZARD_ENDPOINT) return false;
+
+    const payload = buildHazardDraftPayload();
+
+    if (!payload.jobName) return false;
+
+    if (!hasHazardDraftContent(payload)) {
+      if (!quiet) {
+        Alert.alert(
+          "Nothing To Save Yet",
+          "Add some Hazard ID details or a sign-on before saving this job for the week."
+        );
+      }
+
+      return false;
+    }
+
+    try {
+      if (!quiet) setIsHazardDraftSaving(true);
+
+      const response = await fetch(FIREBASE_HAZARD_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "save",
+          ...payload,
+        }),
+      });
+      const responseBody = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(responseBody.error || "Unable to save Hazard ID.");
+      }
+
+      const savedAt = getSubmittedAt();
+      setHazardLastSavedAt(savedAt);
+      setHazardDraftStatus(`Saved for ${payload.jobName}.`);
+
+      if (!quiet) {
+        Alert.alert("Hazard ID Saved", "This job's Hazard ID is saved for the week.");
+      }
+
+      return true;
+    } catch (error) {
+      console.warn("Unable to save Hazard ID draft", error);
+
+      if (!quiet) {
+        Alert.alert("Save Failed", error.message || "Unable to save Hazard ID.");
+      }
+
+      return false;
+    } finally {
+      if (!quiet) setIsHazardDraftSaving(false);
+    }
+  };
+
+  const clearSubmittedHazardDraft = async (payload) => {
+    if (!FIREBASE_HAZARD_ENDPOINT || !payload?.jobNumber) return;
+
+    await fetch(FIREBASE_HAZARD_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "submitted",
+        jobNumber: payload.jobNumber,
+        weekStart: payload.weekStart,
+      }),
+    }).catch((error) => {
+      console.warn("Unable to clear submitted Hazard ID draft", error);
+    });
+  };
+
+  useEffect(() => {
+    if (!selectedHazardJob || !FIREBASE_HAZARD_ENDPOINT) {
+      setHazardDraftStatus("");
+      setHazardLastSavedAt("");
+      return;
+    }
+
+    let isMounted = true;
+    const loadId = hazardDraftLoadRef.current + 1;
+    const weekStart = getCurrentWeekStartIso();
+
+    hazardDraftLoadRef.current = loadId;
+    setIsHazardDraftLoading(true);
+    setHazardDraftStatus("Checking for this week's saved Hazard ID...");
+
+    const loadHazardDraft = async () => {
+      try {
+        const response = await fetch(
+          `${FIREBASE_HAZARD_ENDPOINT}?jobNumber=${encodeURIComponent(
+            selectedHazardJob
+          )}&weekStart=${encodeURIComponent(weekStart)}`
+        );
+        const payload = await response.json().catch(() => ({}));
+
+        if (!isMounted || hazardDraftLoadRef.current !== loadId) return;
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Unable to load Hazard ID.");
+        }
+
+        if (payload.draft) {
+          hydrateHazardDraft(payload.draft);
+        } else {
+          isHydratingHazardDraftRef.current = true;
+          resetHazardForm({ keepJob: true });
+          setTimeout(() => {
+            isHydratingHazardDraftRef.current = false;
+          }, 0);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.warn("Unable to load Hazard ID draft", error);
+          setHazardDraftStatus("Could not load the saved Hazard ID.");
+        }
+      } finally {
+        if (isMounted && hazardDraftLoadRef.current === loadId) {
+          setIsHazardDraftLoading(false);
+        }
+      }
+    };
+
+    loadHazardDraft();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedHazardJob]);
+
+  useEffect(() => {
+    if (
+      activePage !== "hazard" ||
+      !selectedHazardJob ||
+      isHazardDraftLoading ||
+      isHydratingHazardDraftRef.current
+    ) {
+      return;
+    }
+
+    if (hazardDraftSaveTimerRef.current) {
+      clearTimeout(hazardDraftSaveTimerRef.current);
+    }
+
+    hazardDraftSaveTimerRef.current = setTimeout(() => {
+      saveHazardDraft({ quiet: true });
+    }, 1800);
+
+    return () => {
+      if (hazardDraftSaveTimerRef.current) {
+        clearTimeout(hazardDraftSaveTimerRef.current);
+      }
+    };
+  }, [
+    activePage,
+    selectedHazardJob,
+    hazardSiteAddress,
+    hazardTaskDescription,
+    hazardPreparedBy,
+    hazardStartDate,
+    hazardFinishDate,
+    hazardYardChecks,
+    hazardSiteChecks,
+    hazardRisks,
+    hazardControls,
+    hazardExtraControls,
+    hazardToolboxMeeting,
+    hazardSignOffNotes,
+    hazardSignOns,
+    isHazardDraftLoading,
+  ]);
 
   const sendEmailReport = async ({
     subject,
@@ -4012,7 +4282,8 @@ export default function App() {
       const selectedYardChecks = getSelectedLabels(hazardYardChecks);
       const selectedSiteChecks = getSelectedLabels(hazardSiteChecks);
       const selectedControls = getSelectedLabels(hazardControls);
-      const hazardWeekStart = getCurrentWeekStartIso();
+      const hazardDraftPayload = buildHazardDraftPayload();
+      const hazardWeekStart = hazardDraftPayload.weekStart;
       const subject = `Hazard ID - ${hazardSiteAddress.trim()}`;
       const message = buildFiledEmail({
         title: "Hazard Identification Worksheet",
@@ -4059,8 +4330,8 @@ export default function App() {
       const hazardFields = {
         report_type: "Hazard Identification Worksheet",
         template: "hazard_id",
-        job_number: selectedHazardJob,
-        job_name: selectedHazardJobOption?.name || "",
+        job_number: hazardDraftPayload.jobNumber,
+        job_name: hazardDraftPayload.jobName || "",
         week_start: hazardWeekStart,
         site_address: hazardSiteAddress.trim(),
         task_description: hazardTaskDescription.trim(),
@@ -4076,8 +4347,8 @@ export default function App() {
         message,
         fields: hazardFields,
         formData: {
-          jobNumber: selectedHazardJob,
-          jobName: selectedHazardJobOption?.name || "",
+          jobNumber: hazardDraftPayload.jobNumber,
+          jobName: hazardDraftPayload.jobName || "",
           weekStart: hazardWeekStart,
           siteAddress: hazardSiteAddress.trim(),
           taskDescription: hazardTaskDescription.trim(),
@@ -4093,6 +4364,7 @@ export default function App() {
       });
 
       if (sentByFirebase) {
+        await clearSubmittedHazardDraft(hazardDraftPayload);
         Alert.alert("Success", "Hazard ID emailed successfully.");
         resetHazardForm();
         return;
@@ -4122,6 +4394,7 @@ export default function App() {
         "Success",
         "Hazard ID email opened. Tap send in your email app to finish."
       );
+      await clearSubmittedHazardDraft(hazardDraftPayload);
       resetHazardForm();
     } catch (error) {
       Alert.alert("Email Failed", getEmailErrorMessage(error));
@@ -4998,6 +5271,46 @@ export default function App() {
                   jobOptions={jobOptions}
                   isSubmitting={isSubmitting}
                 />
+
+                {!!selectedHazardJob && (
+                  <View style={styles.hazardDraftPanel}>
+                    <Text style={styles.hazardDraftText}>
+                      {isHazardDraftLoading
+                        ? "Loading this job's weekly Hazard ID..."
+                        : hazardDraftStatus ||
+                          "This Hazard ID will save against the selected job for the week."}
+                    </Text>
+                    {!!hazardLastSavedAt && (
+                      <Text style={styles.hazardDraftMeta}>
+                        Last saved: {hazardLastSavedAt}
+                      </Text>
+                    )}
+                    <Pressable
+                      style={[
+                        styles.secondaryButton,
+                        (isSubmitting ||
+                          isHazardDraftLoading ||
+                          isHazardDraftSaving) &&
+                          styles.disabledControl,
+                      ]}
+                      onPress={() => saveHazardDraft({ quiet: false })}
+                      disabled={
+                        isSubmitting ||
+                        isHazardDraftLoading ||
+                        isHazardDraftSaving
+                      }
+                      accessibilityRole="button"
+                    >
+                      {isHazardDraftSaving ? (
+                        <ActivityIndicator color="#D7FF2F" />
+                      ) : (
+                        <Text style={styles.secondaryButtonText}>
+                          SAVE HAZARD ID FOR WEEK
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                )}
 
                 <DraftTextInput
                   placeholder="Site Address"
@@ -6056,6 +6369,29 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginBottom: 6,
     paddingHorizontal: 4,
+  },
+
+  hazardDraftPanel: {
+    backgroundColor: "rgba(215,255,47,0.08)",
+    borderColor: "rgba(215,255,47,0.24)",
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 16,
+  },
+
+  hazardDraftText: {
+    color: "#fff",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700",
+  },
+
+  hazardDraftMeta: {
+    color: "#bdbdbd",
+    fontSize: 12,
+    marginTop: 6,
+    marginBottom: 10,
   },
 
   section: {
