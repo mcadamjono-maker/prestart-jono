@@ -745,10 +745,302 @@ h2 {
   display: flex;
 }
 
+@media (min-width: 901px) and (max-width: 1180px) {
+  main {
+    padding: 18px;
+  }
+
+  .calendar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .job-workspace {
+    grid-template-columns: minmax(220px, 280px) 1fr;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 900px) {
+  .topbar {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .topbar-actions {
+    flex-direction: row;
+  }
+
+  .topbar input {
+    min-width: 200px;
+  }
+
+  .metrics,
+  .calendar,
+  .report-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .job-workspace,
   .job-info-grid,
   .file-upload-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  body {
+    background:
+      radial-gradient(circle at 12% 6%, rgba(215, 255, 47, 0.08), transparent 24%),
+      linear-gradient(160deg, #020202 0%, #101010 58%, #050505 100%);
+  }
+
+  .topbar {
+    position: relative;
+    top: 0;
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.07em;
+  }
+
+  h1 {
+    font-size: 21px;
+  }
+
+  h2 {
+    font-size: 19px;
+  }
+
+  main {
+    padding: 12px;
+  }
+
+  .topbar-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .topbar input {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .topbar button,
+  .job-form button,
+  .actions button,
+  .print-actions button,
+  .button-link,
+  #saveJobInfo,
+  #chooseFiles {
+    width: 100%;
+    min-height: 46px;
+    padding: 0 12px;
+  }
+
+  input,
+  select,
+  textarea {
+    width: 100%;
+    min-width: 0;
+    font-size: 16px;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .metrics article {
+    padding: 12px;
+  }
+
+  .metrics span {
+    font-size: 26px;
+  }
+
+  .tabs {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    margin: 14px -12px 12px;
+    padding: 0 12px 8px;
+    background: linear-gradient(180deg, rgba(5, 5, 5, 0.96), rgba(5, 5, 5, 0.78));
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tabs button {
+    min-width: 116px;
+    min-height: 44px;
+    padding: 0 14px;
+  }
+
+  .panel {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .panel-heading {
+    gap: 10px;
+  }
+
+  .filters {
+    width: 100%;
+  }
+
+  .record {
+    padding: 13px;
+  }
+
+  .record h3 {
+    overflow-wrap: anywhere;
+  }
+
+  .record .actions,
+  .file-record .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .badge {
+    justify-content: center;
+    min-height: 32px;
+    width: 100%;
+  }
+
+  .calendar {
+    grid-template-columns: 1fr;
+  }
+
+  .day {
+    min-height: auto;
+  }
+
+  .day h3 {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .job-form {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .job-workspace {
+    gap: 14px;
+  }
+
+  .jobs {
+    grid-template-columns: 1fr;
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .job-row {
+    min-height: 58px;
+  }
+
+  .job-info-grid {
+    gap: 12px;
+  }
+
+  .drop-zone {
+    min-height: 118px;
+    padding: 18px 12px;
+    border-radius: 18px;
+  }
+
+  .drop-zone strong {
+    font-size: 17px;
+  }
+
+  .file-upload-row {
+    gap: 8px;
+  }
+
+  .file-record {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .drawer {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .drawer-card {
+    width: 100vw;
+    max-width: none;
+    padding: 14px;
+    border-radius: 0;
+  }
+
+  .icon-button {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    float: none;
+    width: 100%;
+    margin-bottom: 10px;
+  }
+
+  .print-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .report-preview header {
+    padding: 14px;
+  }
+
+  .report-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-table {
+    width: calc(100% - 20px);
+    margin: 0 10px 8px;
+  }
+
+  .detail-table th,
+  .detail-table td {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+  }
+
+  .detail-table th {
+    border-bottom: 0;
+    padding-bottom: 2px;
+  }
+
+  .detail-table td {
+    padding-top: 2px;
+  }
+}
+
+@media (max-width: 420px) {
+  .tabs {
+    top: 0;
+  }
+}
+
+@media (max-width: 340px) {
+  .metrics {
     grid-template-columns: 1fr;
   }
 }
