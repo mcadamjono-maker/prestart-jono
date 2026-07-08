@@ -33,8 +33,8 @@
           <p>Filed forms</p>
         </article>
         <article>
-          <span id="purchaseCount">0</span>
-          <p>PO requests</p>
+          <span id="chargeUpCount">0</span>
+          <p>Charge ups</p>
         </article>
         <article>
           <span id="hazardCount">0</span>
@@ -48,9 +48,8 @@
 
       <nav class="tabs" aria-label="Dashboard sections">
         <button class="active" data-tab="reports" type="button">Reports</button>
-        <button data-tab="purchase" type="button">Purchase Orders</button>
         <button data-tab="calendar" type="button">Calendar</button>
-        <button data-tab="jobs" type="button">Jobs</button>
+        <button data-tab="jobs" type="button">Jobs & Files</button>
       </nav>
 
       <section id="reports" class="panel active">
@@ -65,24 +64,13 @@
               <option value="">All types</option>
               <option>Prestart Checklist</option>
               <option>Incident Report</option>
-              <option>Purchase Order Request</option>
-              <option>Job Variation Request</option>
+              <option>Charge Up Job Record</option>
               <option>Hazard ID</option>
               <option>As-Built Plan</option>
             </select>
           </div>
         </div>
         <div id="reportsList" class="list"></div>
-      </section>
-
-      <section id="purchase" class="panel">
-        <div class="panel-heading">
-          <div>
-            <h2>Purchase Order Requests</h2>
-            <p>Record the Xero PO number and mark the request as issued.</p>
-          </div>
-        </div>
-        <div id="purchaseList" class="list"></div>
       </section>
 
       <section id="calendar" class="panel">
@@ -102,8 +90,8 @@
       <section id="jobs" class="panel">
         <div class="panel-heading">
           <div>
-            <h2>Jobs</h2>
-            <p>Add jobs here and they become available in the field app.</p>
+            <h2>Jobs & Files</h2>
+            <p>Add jobs, update job information, and upload plans or site documents for the field app.</p>
           </div>
         </div>
         <form id="jobForm" class="job-form">
@@ -111,7 +99,70 @@
           <input id="jobName" placeholder="Job name / site" />
           <button type="submit">Add Job</button>
         </form>
-        <div id="jobsList" class="jobs"></div>
+        <div class="job-workspace">
+          <aside>
+            <h3>Job List</h3>
+            <div id="jobsList" class="jobs"></div>
+          </aside>
+          <section class="job-info-editor">
+            <div class="panel-heading compact">
+              <div>
+                <h3 id="selectedJobTitle">Select a job</h3>
+                <p id="selectedJobMeta">Choose a job to manage notes and files.</p>
+              </div>
+              <button id="saveJobInfo" type="button">Save Job Info</button>
+            </div>
+
+            <div class="job-info-grid">
+              <label>
+                Job Notes
+                <textarea id="jobNotes" placeholder="General job notes, instructions, access notes..."></textarea>
+              </label>
+              <label>
+                Service Location Information
+                <textarea id="serviceLocationInfo" placeholder="BeforeUdig notes, known service locations, potholing notes..."></textarea>
+              </label>
+              <label>
+                Traffic Management Plan
+                <textarea id="trafficManagementPlan" placeholder="TMP status, setup notes, STMS details..."></textarea>
+              </label>
+              <label>
+                Purchase Order Numbers
+                <textarea id="purchaseOrderNumbers" placeholder="PO numbers and what they relate to..."></textarea>
+              </label>
+              <label>
+                Contacts
+                <textarea id="jobContacts" placeholder="Client, inspector, STMS, key contacts..."></textarea>
+              </label>
+              <label>
+                Other Details
+                <textarea id="otherDetails" placeholder="Anything else the field team needs..."></textarea>
+              </label>
+            </div>
+
+            <div id="dropZone" class="drop-zone">
+              <strong>Drop job files here</strong>
+              <span>Plans, service locations, TMPs, photos, PDFs, or notes</span>
+              <input id="jobFileInput" type="file" multiple />
+            </div>
+
+            <div class="file-upload-row">
+              <select id="fileCategory">
+                <option>Plans</option>
+                <option>Service Location Information</option>
+                <option>Traffic Management Plan</option>
+                <option>Purchase Order</option>
+                <option>Job Notes</option>
+                <option>Photos</option>
+                <option>Other</option>
+              </select>
+              <input id="fileNotes" placeholder="File note / description" />
+              <button id="chooseFiles" type="button">Choose Files</button>
+            </div>
+
+            <div id="jobFilesList" class="file-list"></div>
+          </section>
+        </div>
       </section>
     </main>
 

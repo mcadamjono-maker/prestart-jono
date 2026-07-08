@@ -395,3 +395,259 @@ pre {
     display: none !important;
   }
 }
+
+/* WDL dark field-app theme */
+:root {
+  color-scheme: dark;
+  --accent: #d7ff2f;
+  --blue: #1f57ff;
+  --ink: #f6f7f4;
+  --muted: #a7ada5;
+  --line: rgba(255, 255, 255, 0.11);
+  --soft: rgba(255, 255, 255, 0.055);
+  --panel: rgba(8, 8, 8, 0.82);
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 16% 8%, rgba(215, 255, 47, 0.09), transparent 25%),
+    radial-gradient(circle at 88% 18%, rgba(31, 87, 255, 0.11), transparent 28%),
+    linear-gradient(135deg, #030303 0%, #111 48%, #050505 100%);
+  color: var(--ink);
+}
+
+.topbar {
+  background: rgba(5, 5, 5, 0.94);
+  border-bottom: 1px solid rgba(215, 255, 47, 0.36);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+}
+
+input,
+select,
+textarea,
+.tabs button,
+.metrics article,
+.panel,
+.drawer-card,
+.record,
+.day,
+.job-row,
+.file-record {
+  background: rgba(8, 8, 8, 0.78);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+input,
+select,
+textarea {
+  border-radius: 18px;
+  outline: none;
+}
+
+textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(215, 255, 47, 0.66);
+  box-shadow: 0 0 0 3px rgba(215, 255, 47, 0.12);
+}
+
+.metrics article,
+.panel,
+.drawer-card {
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.3);
+}
+
+.metrics span,
+.eyebrow,
+h2 {
+  color: var(--accent);
+}
+
+.metrics p,
+.panel-heading p,
+.meta,
+.empty,
+.file-record p,
+.file-record small {
+  color: var(--muted);
+}
+
+.tabs button {
+  border-radius: 18px;
+}
+
+.tabs button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+}
+
+.topbar button,
+.job-form button,
+.actions button,
+.print-actions button,
+.button-link,
+#saveJobInfo,
+#chooseFiles {
+  min-height: 42px;
+  border-radius: 18px;
+  background: var(--accent);
+  color: #000;
+  font-weight: 900;
+}
+
+.actions button.secondary,
+.file-record button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.badge {
+  background: rgba(215, 255, 47, 0.12);
+  border: 1px solid rgba(215, 255, 47, 0.32);
+  color: var(--accent);
+}
+
+.job-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 330px) 1fr;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.job-workspace aside,
+.job-info-editor {
+  min-width: 0;
+}
+
+.job-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.job-info-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.job-row {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.job-row strong {
+  color: var(--accent);
+}
+
+.job-row span {
+  color: var(--ink);
+}
+
+.job-row.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(215, 255, 47, 0.12);
+}
+
+.drop-zone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 7px;
+  min-height: 150px;
+  margin-top: 18px;
+  border: 2px dashed rgba(215, 255, 47, 0.35);
+  border-radius: 22px;
+  background: rgba(215, 255, 47, 0.06);
+  color: var(--ink);
+  text-align: center;
+}
+
+.drop-zone strong {
+  color: var(--accent);
+  font-size: 20px;
+}
+
+.drop-zone span {
+  color: var(--muted);
+}
+
+.drop-zone.dragging {
+  border-color: var(--accent);
+  background: rgba(215, 255, 47, 0.14);
+}
+
+.drop-zone input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-upload-row {
+  display: grid;
+  grid-template-columns: 220px 1fr auto;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.file-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.file-record {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.file-record h4 {
+  margin: 0 0 4px;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  text-decoration: none;
+}
+
+.panel-heading.compact {
+  padding: 0;
+}
+
+.drawer[aria-hidden="false"] {
+  display: flex;
+}
+
+@media (max-width: 900px) {
+  .job-workspace,
+  .job-info-grid,
+  .file-upload-row {
+    grid-template-columns: 1fr;
+  }
+}

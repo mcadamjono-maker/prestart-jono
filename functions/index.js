@@ -3,9 +3,13 @@ const admin = require("firebase-admin");
 
 const MAX_ATTACHMENTS = 8;
 const MAX_BASE64_ATTACHMENT_CHARS = 36 * 1024 * 1024;
+const MAX_JOB_FILE_BASE64_CHARS = 24 * 1024 * 1024;
 const DEFAULT_TO_EMAIL = "Jonomcadam@hotmail.com";
 const DEFAULT_FROM_EMAIL = "WDL Field Forms <no-reply@maileroo.com>";
 const DEFAULT_SMTP_HOST = "smtp.maileroo.com";
+const DEFAULT_JOB_FILES_BUCKET = "wdl-field-forms-job-files";
+const DEFAULT_JOB_INFO_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
 const ALLOWED_RECIPIENT_EMAILS = [DEFAULT_TO_EMAIL.toLowerCase()];
 
@@ -14,6 +18,8 @@ if (!admin.apps.length) {
 }
 
 const getFirestore = () => admin.firestore();
+const getJobFilesBucket = () =>
+  admin.storage().bucket(process.env.JOB_FILES_BUCKET || DEFAULT_JOB_FILES_BUCKET);
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -43,6 +49,9 @@ const formatReportHeading = (reportType) => {
     "purchase order request": "Purchase Order Request",
     "job variation": "Job Variation Request",
     "job variation request": "Job Variation Request",
+    "charge up": "Charge Up Job Record",
+    "charge up job": "Charge Up Job Record",
+    "charge up job record": "Charge Up Job Record",
     "hazard id": "Hazard ID",
     "hazard identification worksheet": "Hazard ID",
     "as built": "As-Built Plan",
@@ -117,6 +126,76 @@ const formatJob = (doc) => {
   return {
     number: data.number || doc.id,
     name: data.name || "",
+  };
+};
+
+const normaliseJobFileCategory = (category) => {
+  const cleanedCategory = String(category || "Other")
+    .replace(/[\r\n]+/g, " ")
+    .trim()
+    .slice(0, 80);
+
+  return cleanedCategory || "Other";
+};
+
+const normaliseJobFileContent = (content) => {
+  const base64Content = String(content || "").replace(/^data:.*?;base64,/, "");
+
+  if (!base64Content) {
+    throw new Error("File content is required.");
+  }
+
+  if (base64Content.length > MAX_JOB_FILE_BASE64_CHARS) {
+    throw new Error("File is too large. Use a smaller file.");
+  }
+
+  return Buffer.from(base64Content, "base64");
+};
+
+const getJobFiles = async (jobRef) => {
+  const snapshot = await jobRef
+    .collection("files")
+    .orderBy("uploadedAt", "desc")
+    .limit(100)
+    .get();
+
+  return snapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+
+      return {
+        id: doc.id,
+        filename: data.filename || "Job file",
+        category: data.category || "Other",
+        notes: data.notes || "",
+        contentType: data.contentType || "application/octet-stream",
+        size: data.size || 0,
+        storagePath: data.storagePath || "",
+        uploadedBy: data.uploadedBy || "",
+        uploadedAtIso: data.uploadedAtIso || "",
+        url: `${DEFAULT_JOB_INFO_ENDPOINT}?jobNumber=${encodeURIComponent(
+          jobRef.id
+        )}&fileId=${encodeURIComponent(doc.id)}&download=1`,
+      };
+    })
+};
+
+const publicJobInfo = async (jobRef) => {
+  const doc = await jobRef.get();
+  const data = doc.data() || {};
+  const files = await getJobFiles(jobRef);
+
+  return {
+    number: data.number || jobRef.id,
+    name: data.name || "",
+    notes: data.notes || "",
+    serviceLocationInfo: data.serviceLocationInfo || "",
+    trafficManagementPlan: data.trafficManagementPlan || "",
+    purchaseOrderNumbers: data.purchaseOrderNumbers || "",
+    contacts: data.contacts || "",
+    accessInfo: data.accessInfo || "",
+    otherDetails: data.otherDetails || "",
+    updatedAtIso: data.updatedAtIso || "",
+    files,
   };
 };
 
@@ -756,6 +835,222 @@ exports.jobs = onRequest(
   }
 );
 
+exports.jobInfo = onRequest(
+  {
+    region: "australia-southeast1",
+    cors: true,
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+  async (request, response) => {
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    try {
+      const db = getFirestore();
+      const jobNumber = normaliseJobNumber(
+        request.query?.jobNumber || request.body?.jobNumber
+      );
+
+      if (!jobNumber) {
+        response.status(400).json({ error: "Job number is required." });
+        return;
+      }
+
+      const jobRef = db.collection("jobs").doc(jobNumber);
+
+      if (request.method === "GET") {
+        const fileId = String(request.query?.fileId || "").trim();
+
+        if (fileId && request.query?.download) {
+          const fileDoc = await jobRef.collection("files").doc(fileId).get();
+
+          if (!fileDoc.exists) {
+            response.status(404).send("File not found.");
+            return;
+          }
+
+          const fileData = fileDoc.data() || {};
+
+          if (!fileData.storagePath) {
+            response.status(404).send("File path not found.");
+            return;
+          }
+
+          const [content] = await getJobFilesBucket()
+            .file(fileData.storagePath)
+            .download();
+
+          response.setHeader(
+            "Content-Type",
+            fileData.contentType || "application/octet-stream"
+          );
+          response.setHeader(
+            "Content-Disposition",
+            `inline; filename="${normaliseFilename(fileData.filename, 0)}"`
+          );
+          response.status(200).send(content);
+          return;
+        }
+
+        response.status(200).json({
+          ok: true,
+          job: await publicJobInfo(jobRef),
+        });
+        return;
+      }
+
+      if (request.method === "POST") {
+        assertDashboardAccess(request);
+
+        const action = String(request.body?.action || "updateInfo");
+        const now = new Date();
+
+        if (action === "updateInfo") {
+          const jobName = normaliseJobName(request.body?.name);
+
+          await jobRef.set(
+            {
+              number: jobNumber,
+              ...(jobName ? { name: jobName } : {}),
+              notes: String(request.body?.notes || "").trim().slice(0, 6000),
+              serviceLocationInfo: String(
+                request.body?.serviceLocationInfo || ""
+              )
+                .trim()
+                .slice(0, 6000),
+              trafficManagementPlan: String(
+                request.body?.trafficManagementPlan || ""
+              )
+                .trim()
+                .slice(0, 6000),
+              purchaseOrderNumbers: String(
+                request.body?.purchaseOrderNumbers || ""
+              )
+                .trim()
+                .slice(0, 3000),
+              contacts: String(request.body?.contacts || "")
+                .trim()
+                .slice(0, 3000),
+              accessInfo: String(request.body?.accessInfo || "")
+                .trim()
+                .slice(0, 3000),
+              otherDetails: String(request.body?.otherDetails || "")
+                .trim()
+                .slice(0, 6000),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAtIso: now.toISOString(),
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          response.status(200).json({
+            ok: true,
+            job: await publicJobInfo(jobRef),
+          });
+          return;
+        }
+
+        if (action === "uploadFile") {
+          const filename = normaliseFilename(request.body?.filename, 0);
+          const contentType =
+            String(request.body?.contentType || "").trim() ||
+            "application/octet-stream";
+          const fileBuffer = normaliseJobFileContent(request.body?.content);
+          const storageName = filename.replace(/[^\w.\-]/g, "_");
+          const storagePath = `job-files/${jobNumber}/${Date.now()}-${storageName}`;
+
+          await getJobFilesBucket().file(storagePath).save(fileBuffer, {
+            resumable: false,
+            metadata: {
+              contentType,
+              metadata: {
+                jobNumber,
+                originalFilename: filename,
+              },
+            },
+          });
+
+          await jobRef.set(
+            {
+              number: jobNumber,
+              ...(request.body?.jobName
+                ? { name: normaliseJobName(request.body.jobName) }
+                : {}),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAtIso: now.toISOString(),
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          const fileRef = jobRef.collection("files").doc();
+
+          await fileRef.set({
+            filename,
+            category: normaliseJobFileCategory(request.body?.category),
+            notes: String(request.body?.notes || "").trim().slice(0, 1000),
+            contentType,
+            size: fileBuffer.length,
+            storagePath,
+            uploadedBy: String(request.body?.uploadedBy || "")
+              .trim()
+              .slice(0, 120),
+            uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+            uploadedAtIso: now.toISOString(),
+          });
+
+          response.status(200).json({
+            ok: true,
+            job: await publicJobInfo(jobRef),
+          });
+          return;
+        }
+
+        if (action === "deleteFile") {
+          const fileId = String(request.body?.fileId || "").trim();
+
+          if (!fileId) {
+            response.status(400).json({ error: "File ID is required." });
+            return;
+          }
+
+          const fileRef = jobRef.collection("files").doc(fileId);
+          const fileDoc = await fileRef.get();
+          const storagePath = fileDoc.data()?.storagePath;
+
+          if (storagePath) {
+            await getJobFilesBucket().file(storagePath).delete({
+              ignoreNotFound: true,
+            });
+          }
+
+          await fileRef.delete();
+
+          response.status(200).json({
+            ok: true,
+            job: await publicJobInfo(jobRef),
+          });
+          return;
+        }
+
+        response.status(400).json({ error: "Unknown job information action." });
+        return;
+      }
+
+      response.status(405).json({ error: "GET or POST required." });
+    } catch (error) {
+      console.error("jobInfo failed", { message: error.message });
+      response.status(error.statusCode || 500).json({
+        error: error.message || "Unable to update job information.",
+      });
+    }
+  }
+);
+
 exports.hazardId = onRequest(
   {
     region: "australia-southeast1",
@@ -881,6 +1176,9 @@ exports.dashboard = onRequest(
           const purchaseRequests = reports.filter(
             (report) => report.reportType === "Purchase Order Request"
           );
+          const chargeUpReports = reports.filter(
+            (report) => report.reportType === "Charge Up Job Record"
+          );
           const hazardReports = [
             ...hazardDraftsSnapshot.docs.map(publicHazardDraft),
             ...reports.filter((report) => report.reportType === "Hazard ID"),
@@ -891,6 +1189,7 @@ exports.dashboard = onRequest(
             jobs: jobsSnapshot.docs.map(formatJob).filter((job) => job.name),
             reports,
             purchaseRequests,
+            chargeUpReports,
             hazardReports,
           });
           return;

@@ -5,6 +5,7 @@ import {
   Image,
   ImageBackground,
   KeyboardAvoidingView,
+  Linking,
   PanResponder,
   Platform,
   Pressable,
@@ -145,14 +146,14 @@ const APP_TABS = [
     description: "Record an incident and email the details",
   },
   {
-    key: "purchase",
-    label: "Purchase Order Request",
-    description: "Request a PO for Xero to issue",
+    key: "chargeup",
+    label: "Charge Up",
+    description: "Record labour, plant, equipment, and materials",
   },
   {
-    key: "variation",
-    label: "Job Variation",
-    description: "Record extra work or scope changes",
+    key: "jobinfo",
+    label: "Job Information",
+    description: "Plans, services, TMP, notes, and PO numbers",
   },
   {
     key: "hazard",
@@ -208,6 +209,11 @@ const DEFAULT_FIREBASE_HAZARD_ENDPOINT =
 const FIREBASE_HAZARD_ENDPOINT =
   process.env.EXPO_PUBLIC_FIREBASE_HAZARD_ENDPOINT ||
   DEFAULT_FIREBASE_HAZARD_ENDPOINT;
+const DEFAULT_FIREBASE_JOB_INFO_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
+const FIREBASE_JOB_INFO_ENDPOINT =
+  process.env.EXPO_PUBLIC_FIREBASE_JOB_INFO_ENDPOINT ||
+  DEFAULT_FIREBASE_JOB_INFO_ENDPOINT;
 const MAX_REPORT_ATTACHMENT_BYTES = 28 * 1024 * 1024;
 const SETTINGS_STORAGE_KEY = "williams-field-forms-settings";
 const PRESTART_STORAGE_PREFIX = "williams-prestart-values";
@@ -1786,6 +1792,22 @@ export default function App() {
   const [selectedPurchaseJob, setSelectedPurchaseJob] = useState("");
   const [isPurchaseJobDropdownOpen, setIsPurchaseJobDropdownOpen] =
     useState(false);
+  const [selectedChargeJob, setSelectedChargeJob] = useState("");
+  const [isChargeJobDropdownOpen, setIsChargeJobDropdownOpen] =
+    useState(false);
+  const [chargeDate, setChargeDate] = useState("");
+  const [chargeEnteredBy, setChargeEnteredBy] = useState("");
+  const [chargeWorkers, setChargeWorkers] = useState("");
+  const [chargeHours, setChargeHours] = useState("");
+  const [chargeEquipment, setChargeEquipment] = useState("");
+  const [chargeMaterials, setChargeMaterials] = useState("");
+  const [chargeNotes, setChargeNotes] = useState("");
+  const [chargePhotos, setChargePhotos] = useState([]);
+  const [selectedInfoJob, setSelectedInfoJob] = useState("");
+  const [isInfoJobDropdownOpen, setIsInfoJobDropdownOpen] = useState(false);
+  const [jobInfo, setJobInfo] = useState(null);
+  const [isJobInfoLoading, setIsJobInfoLoading] = useState(false);
+  const [jobInfoError, setJobInfoError] = useState("");
   const [selectedVariationJob, setSelectedVariationJob] = useState("");
   const [isVariationJobDropdownOpen, setIsVariationJobDropdownOpen] =
     useState(false);
@@ -1895,6 +1917,12 @@ export default function App() {
     normalizeEmailAddress(recipientEmail) || DEFAULT_EMAIL_RECIPIENT;
   const selectedPurchaseJobOption = jobOptions.find(
     (job) => job.number === selectedPurchaseJob
+  );
+  const selectedChargeJobOption = jobOptions.find(
+    (job) => job.number === selectedChargeJob
+  );
+  const selectedInfoJobOption = jobOptions.find(
+    (job) => job.number === selectedInfoJob
   );
   const selectedVariationJobOption = jobOptions.find(
     (job) => job.number === selectedVariationJob
@@ -2418,6 +2446,14 @@ export default function App() {
     }
   };
 
+  const pickChargePhoto = async () => {
+    const capturedPhoto = await captureCompressedPhoto("charge-up-photo.jpg");
+
+    if (capturedPhoto) {
+      setChargePhotos((currentPhotos) => [...currentPhotos, capturedPhoto]);
+    }
+  };
+
   const pickVariationPhoto = async () => {
     const capturedPhoto = await captureCompressedPhoto("variation-photo.jpg");
 
@@ -2448,6 +2484,19 @@ export default function App() {
     setPoSupplier("");
     setPoDetails("");
     setIsPurchaseJobDropdownOpen(false);
+  };
+
+  const resetChargeUpForm = () => {
+    setSelectedChargeJob("");
+    setIsChargeJobDropdownOpen(false);
+    setChargeDate("");
+    setChargeEnteredBy("");
+    setChargeWorkers("");
+    setChargeHours("");
+    setChargeEquipment("");
+    setChargeMaterials("");
+    setChargeNotes("");
+    setChargePhotos([]);
   };
 
   const resetVariationForm = () => {
@@ -3006,6 +3055,67 @@ export default function App() {
     hazardSignOns,
     isHazardDraftLoading,
   ]);
+
+  const loadSelectedJobInfo = async ({ showAlert = false } = {}) => {
+    if (!selectedInfoJob) {
+      setJobInfo(null);
+      setJobInfoError("");
+      return;
+    }
+
+    if (!FIREBASE_JOB_INFO_ENDPOINT) {
+      setJobInfoError("Job information is not configured yet.");
+      return;
+    }
+
+    setIsJobInfoLoading(true);
+    setJobInfoError("");
+
+    try {
+      const response = await fetch(
+        `${FIREBASE_JOB_INFO_ENDPOINT}?jobNumber=${encodeURIComponent(
+          selectedInfoJob
+        )}`
+      );
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to load job information.");
+      }
+
+      setJobInfo(payload.job || null);
+
+      if (showAlert) {
+        Alert.alert("Job Information Updated", "The latest office info has loaded.");
+      }
+    } catch (error) {
+      setJobInfoError(error.message || "Unable to load job information.");
+    } finally {
+      setIsJobInfoLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSelectedJobInfo();
+  }, [selectedInfoJob]);
+
+  const openJobFile = async (file) => {
+    const fileUrl = file?.url;
+
+    if (!fileUrl) {
+      Alert.alert("File Unavailable", "This file does not have a download link.");
+      return;
+    }
+
+    const canOpen = await Linking.canOpenURL(fileUrl);
+
+    if (!canOpen) {
+      Alert.alert("File Unavailable", "This device cannot open that file link.");
+      return;
+    }
+
+    await Linking.openURL(fileUrl);
+  };
 
   const sendEmailReport = async ({
     subject,
@@ -4005,6 +4115,151 @@ export default function App() {
     }
   };
 
+  const submitChargeUp = async () => {
+    if (!selectedChargeJob) {
+      Alert.alert("Validation", "Please select the job.");
+      return;
+    }
+
+    if (!chargeEnteredBy.trim()) {
+      Alert.alert("Validation", "Please enter who filled this in.");
+      return;
+    }
+
+    if (!chargeWorkers.trim() && !chargeEquipment.trim() && !chargeMaterials.trim()) {
+      Alert.alert(
+        "Validation",
+        "Please enter labour, equipment, or materials used."
+      );
+      return;
+    }
+
+    if (!(await confirmEmailSubmit("charge up job record"))) return;
+
+    setIsSubmitting(true);
+
+    try {
+      const chargePhotoAttachments = getPhotoAttachments(chargePhotos);
+      const chargePhotoSummary = getPhotoSummary(
+        chargePhotos,
+        "No charge up photos captured"
+      );
+      const jobName = selectedChargeJobOption?.name || selectedChargeJob;
+      const subject = `Charge up job record - ${jobName}`;
+      const message = buildFiledEmail({
+        title: "Charge Up Job Record",
+        reference: jobName,
+        sections: [
+          {
+            title: "Job Details",
+            rows: [
+              ["Job Name", selectedChargeJobOption?.name],
+              ["Job Number", selectedChargeJob],
+              ["Date", chargeDate.trim()],
+              ["Entered By", chargeEnteredBy.trim()],
+            ],
+          },
+          {
+            title: "Labour and Plant",
+            rows: [
+              ["People On Site", chargeWorkers.trim()],
+              ["Hours", chargeHours.trim()],
+              ["Equipment / Plant Used", chargeEquipment.trim()],
+            ],
+          },
+          {
+            title: "Materials and Notes",
+            rows: [
+              ["Materials Used", chargeMaterials.trim()],
+              ["Notes", chargeNotes.trim()],
+              ["Photos", chargePhotoSummary],
+            ],
+          },
+        ],
+      });
+
+      const fields = {
+        report_type: "Charge Up Job Record",
+        template: "charge_up",
+        job_number: selectedChargeJob,
+        job_name: selectedChargeJobOption?.name || "",
+        date: chargeDate.trim() || "Not supplied",
+        entered_by: chargeEnteredBy.trim(),
+        people_on_site: chargeWorkers.trim() || "Not supplied",
+        hours: chargeHours.trim() || "Not supplied",
+        equipment_used: chargeEquipment.trim() || "Not supplied",
+        materials_used: chargeMaterials.trim() || "Not supplied",
+        notes: chargeNotes.trim() || "Not supplied",
+        operator: chargeEnteredBy.trim(),
+        machine: selectedChargeJob,
+        answers: `People: ${chargeWorkers.trim() || "Not supplied"}\nHours: ${
+          chargeHours.trim() || "Not supplied"
+        }\nEquipment: ${chargeEquipment.trim() || "Not supplied"}\nMaterials: ${
+          chargeMaterials.trim() || "Not supplied"
+        }`,
+        photoName:
+          chargePhotos.length > 0
+            ? `${chargePhotos.length} photo(s) captured`
+            : "No photo captured",
+        photoType: chargePhotos.length > 0 ? "image/jpeg" : "",
+        photoStatus:
+          chargePhotos.length > 0
+            ? `${chargePhotos.length} charge up photo(s) were captured.`
+            : "No charge up photos captured.",
+      };
+
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "Charge Up Job Record",
+        subject,
+        message,
+        fields,
+        formData: {
+          jobNumber: selectedChargeJob,
+          jobName: selectedChargeJobOption?.name || "",
+          date: chargeDate.trim(),
+          enteredBy: chargeEnteredBy.trim(),
+          workers: chargeWorkers.trim(),
+          hours: chargeHours.trim(),
+          equipment: chargeEquipment.trim(),
+          materials: chargeMaterials.trim(),
+          notes: chargeNotes.trim(),
+        },
+        photoList: chargePhotos,
+        photoFilenamePrefix: "charge-up-photo",
+      });
+
+      if (!sentByFirebase && chargePhotoAttachments.length > 0) {
+        const canCompose = await MailComposer.isAvailableAsync();
+
+        if (!canCompose) {
+          Alert.alert(
+            "Email App Required",
+            "To send a charge up record, this device needs an email app set up."
+          );
+          return;
+        }
+
+        const mailResult = await MailComposer.composeAsync({
+          recipients: [activeRecipientEmail],
+          subject,
+          body: message,
+          attachments: chargePhotoAttachments,
+        });
+
+        if (mailResult.status === "cancelled") {
+          return;
+        }
+      }
+
+      Alert.alert("Success", "Charge up job record emailed successfully.");
+      resetChargeUpForm();
+    } catch (error) {
+      Alert.alert("Email Failed", getEmailErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const submitPurchaseOrder = async () => {
     if (!poRequester.trim()) {
       Alert.alert("Validation", "Please enter who requested the purchase order.");
@@ -4972,254 +5227,103 @@ export default function App() {
             </>
           )}
 
-          {activePage === "purchase" && (
+          {activePage === "chargeup" && (
             <>
               <View style={styles.pageHeader}>
-                <Text style={styles.pageTitle}>Purchase Order Request</Text>
+                <Text style={styles.pageTitle}>Charge Up</Text>
                 <Text style={styles.pageSubtitle}>
-                  Send the request through so the PO number can be issued in Xero.
+                  Record labour, hours, equipment, and materials for charge up work.
                 </Text>
               </View>
 
               <View style={styles.card}>
-                <DraftTextInput
-                  placeholder="Requested By"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={poRequester}
-                  onChangeText={setPoRequester}
-                  editable={!isSubmitting}
-                />
-
-                <DraftTextInput
-                  placeholder="Supplier"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={poSupplier}
-                  onChangeText={setPoSupplier}
-                  editable={!isSubmitting}
-                />
-
+                <Text style={styles.inputLabel}>Job</Text>
                 <StableJobSelect
-                  selectedJobNumber={selectedPurchaseJob}
-                  selectedJobOption={selectedPurchaseJobOption}
-                  isOpen={isPurchaseJobDropdownOpen}
-                  setIsOpen={setIsPurchaseJobDropdownOpen}
-                  onSelectJob={setSelectedPurchaseJob}
+                  selectedJobNumber={selectedChargeJob}
+                  selectedJobOption={selectedChargeJobOption}
+                  isOpen={isChargeJobDropdownOpen}
+                  setIsOpen={setIsChargeJobDropdownOpen}
+                  onSelectJob={setSelectedChargeJob}
                   jobOptions={jobOptions}
                   isSubmitting={isSubmitting}
                 />
 
+                <StableLabeledInput
+                  label="Date"
+                  value={chargeDate}
+                  onChangeText={setChargeDate}
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Entered By"
+                  value={chargeEnteredBy}
+                  onChangeText={setChargeEnteredBy}
+                  editable={!isSubmitting}
+                />
+
+                <Text style={styles.inputLabel}>People On Site</Text>
                 <DraftTextInput
-                  placeholder="Purchase details..."
+                  placeholder="Names and roles..."
                   placeholderTextColor="#8a8a8a"
                   multiline
                   style={styles.notes}
-                  value={poDetails}
-                  onChangeText={setPoDetails}
-                  editable={!isSubmitting}
-                />
-              </View>
-
-              <Pressable
-                style={[
-                  styles.submitButton,
-                  isSubmitting && styles.disabledButton,
-                ]}
-                onPress={submitPurchaseOrder}
-                disabled={isSubmitting}
-                accessibilityRole="button"
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.submitText}>
-                    SUBMIT PURCHASE ORDER REQUEST
-                  </Text>
-                )}
-              </Pressable>
-            </>
-          )}
-
-          {activePage === "variation" && (
-            <>
-              <View style={styles.pageHeader}>
-                <Text style={styles.pageTitle}>Job Variation</Text>
-                <Text style={styles.pageSubtitle}>
-                  Record extra work, scope changes, and supporting details.
-                </Text>
-              </View>
-
-              <View style={styles.card}>
-                <StableJobSelect
-                  selectedJobNumber={selectedVariationJob}
-                  selectedJobOption={selectedVariationJobOption}
-                  isOpen={isVariationJobDropdownOpen}
-                  setIsOpen={setIsVariationJobDropdownOpen}
-                  onSelectJob={setSelectedVariationJob}
-                  jobOptions={jobOptions}
-                  isSubmitting={isSubmitting}
-                />
-
-                <DraftTextInput
-                  placeholder="Requested By"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationRequestedBy}
-                  onChangeText={setVariationRequestedBy}
+                  value={chargeWorkers}
+                  onChangeText={setChargeWorkers}
                   editable={!isSubmitting}
                 />
 
-                <DraftTextInput
-                  placeholder="Date"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationDate}
-                  onChangeText={setVariationDate}
+                <View style={styles.inputGap} />
+
+                <StableLabeledInput
+                  label="Hours"
+                  value={chargeHours}
+                  onChangeText={setChargeHours}
+                  keyboardType="decimal-pad"
                   editable={!isSubmitting}
                 />
 
+                <Text style={styles.inputLabel}>Equipment / Plant Used</Text>
                 <DraftTextInput
-                  placeholder="Client"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationClient}
-                  onChangeText={setVariationClient}
-                  editable={!isSubmitting}
-                />
-
-                <DraftTextInput
-                  placeholder="Site Address"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationSiteAddress}
-                  onChangeText={setVariationSiteAddress}
-                  editable={!isSubmitting}
-                />
-
-                <DraftTextInput
-                  placeholder="Variation Number"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationNumber}
-                  onChangeText={setVariationNumber}
-                  editable={!isSubmitting}
-                />
-
-                <DraftTextInput
-                  placeholder="WDL Representative"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationRepresentative}
-                  onChangeText={setVariationRepresentative}
-                  editable={!isSubmitting}
-                />
-
-                <DraftTextInput
-                  placeholder="Description of variation..."
+                  placeholder="Excavator, truck, plate compactor..."
                   placeholderTextColor="#8a8a8a"
                   multiline
                   style={styles.notes}
-                  value={variationDescription}
-                  onChangeText={setVariationDescription}
+                  value={chargeEquipment}
+                  onChangeText={setChargeEquipment}
                   editable={!isSubmitting}
                 />
 
-                <Text style={styles.formSectionTitle}>Reason for Variation</Text>
-                <View style={styles.optionGrid}>
-                  {VARIATION_REASONS.map((reason) => {
-                    const isSelected = !!variationReasons[reason];
+                <View style={styles.inputGap} />
 
-                    return (
-                      <Pressable
-                        key={reason}
-                        style={[
-                          styles.optionButton,
-                          isSelected && styles.optionButtonSelected,
-                          isSubmitting && styles.disabledControl,
-                        ]}
-                        onPress={() => toggleVariationReason(reason)}
-                        disabled={isSubmitting}
-                        accessibilityRole="button"
-                      >
-                        <Text
-                          style={[
-                            styles.optionButtonText,
-                            isSelected && styles.optionButtonTextSelected,
-                          ]}
-                        >
-                          {reason}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
+                <Text style={styles.inputLabel}>Materials Used</Text>
                 <DraftTextInput
-                  placeholder="Other reason"
+                  placeholder="Pipe, fittings, metal, concrete..."
                   placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationOtherReason}
-                  onChangeText={setVariationOtherReason}
+                  multiline
+                  style={styles.notes}
+                  value={chargeMaterials}
+                  onChangeText={setChargeMaterials}
                   editable={!isSubmitting}
                 />
 
-                <Text style={styles.formSectionTitle}>Resources Used</Text>
+                <View style={styles.inputGap} />
+
+                <Text style={styles.inputLabel}>Notes</Text>
                 <DraftTextInput
-                  placeholder="Labour description"
+                  placeholder="What was completed, delays, approvals, docket refs..."
                   placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationLabourDescription}
-                  onChangeText={setVariationLabourDescription}
-                  editable={!isSubmitting}
-                />
-                <DraftTextInput
-                  placeholder="Labour hours"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationLabourHours}
-                  onChangeText={setVariationLabourHours}
-                  keyboardType="decimal-pad"
-                  editable={!isSubmitting}
-                />
-                <DraftTextInput
-                  placeholder="Plant used"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationPlantUsed}
-                  onChangeText={setVariationPlantUsed}
-                  editable={!isSubmitting}
-                />
-                <DraftTextInput
-                  placeholder="Plant hours"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationPlantHours}
-                  onChangeText={setVariationPlantHours}
-                  keyboardType="decimal-pad"
-                  editable={!isSubmitting}
-                />
-                <DraftTextInput
-                  placeholder="Materials used"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationMaterialsUsed}
-                  onChangeText={setVariationMaterialsUsed}
-                  editable={!isSubmitting}
-                />
-                <DraftTextInput
-                  placeholder="Materials quantity"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={variationMaterialsQuantity}
-                  onChangeText={setVariationMaterialsQuantity}
+                  multiline
+                  style={styles.notes}
+                  value={chargeNotes}
+                  onChangeText={setChargeNotes}
                   editable={!isSubmitting}
                 />
 
                 <View style={styles.inputGap} />
 
                 <Pressable
-                  onPress={pickVariationPhoto}
+                  onPress={pickChargePhoto}
                   disabled={isSubmitting}
                   style={[
                     styles.photoButton,
@@ -5227,10 +5331,10 @@ export default function App() {
                   ]}
                   accessibilityRole="button"
                 >
-                  <Text style={styles.photoText}>Take Variation Photo</Text>
+                  <Text style={styles.photoText}>Take Charge Up Photo</Text>
                 </Pressable>
 
-                <StablePhotoPreviewList photoList={variationPhotos} />
+                <StablePhotoPreviewList photoList={chargePhotos} />
               </View>
 
               <Pressable
@@ -5238,16 +5342,151 @@ export default function App() {
                   styles.submitButton,
                   isSubmitting && styles.disabledButton,
                 ]}
-                onPress={submitVariationRequest}
+                onPress={submitChargeUp}
                 disabled={isSubmitting}
                 accessibilityRole="button"
               >
                 {isSubmitting ? (
                   <ActivityIndicator color="#000" />
                 ) : (
-                  <Text style={styles.submitText}>SUBMIT VARIATION</Text>
+                  <Text style={styles.submitText}>SUBMIT CHARGE UP</Text>
                 )}
               </Pressable>
+            </>
+          )}
+
+          {activePage === "jobinfo" && (
+            <>
+              <View style={styles.pageHeader}>
+                <Text style={styles.pageTitle}>Job Information</Text>
+                <Text style={styles.pageSubtitle}>
+                  Find plans, service locations, TMP notes, PO numbers, and job files.
+                </Text>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.inputLabel}>Job</Text>
+                <StableJobSelect
+                  selectedJobNumber={selectedInfoJob}
+                  selectedJobOption={selectedInfoJobOption}
+                  isOpen={isInfoJobDropdownOpen}
+                  setIsOpen={setIsInfoJobDropdownOpen}
+                  onSelectJob={setSelectedInfoJob}
+                  jobOptions={jobOptions}
+                  isSubmitting={isSubmitting}
+                />
+
+                <Pressable
+                  onPress={() => loadSelectedJobInfo({ showAlert: true })}
+                  disabled={isJobInfoLoading || !selectedInfoJob}
+                  style={[
+                    styles.secondaryButton,
+                    (isJobInfoLoading || !selectedInfoJob) &&
+                      styles.disabledControl,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  {isJobInfoLoading ? (
+                    <ActivityIndicator color="#D7FF2F" />
+                  ) : (
+                    <Text style={styles.secondaryButtonText}>
+                      REFRESH JOB INFORMATION
+                    </Text>
+                  )}
+                </Pressable>
+
+                {!!jobInfoError && (
+                  <Text style={styles.infoErrorText}>{jobInfoError}</Text>
+                )}
+
+                {!selectedInfoJob && (
+                  <Text style={styles.settingsHelpText}>
+                    Select a job to view the information uploaded from the
+                    office dashboard.
+                  </Text>
+                )}
+
+                {!!selectedInfoJob && !isJobInfoLoading && !jobInfoError && (
+                  <>
+                    <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>Job Notes</Text>
+                      <Text style={styles.jobInfoText}>
+                        {jobInfo?.notes || "No job notes uploaded yet."}
+                      </Text>
+                    </View>
+
+                    <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>
+                        Service Location Information
+                      </Text>
+                      <Text style={styles.jobInfoText}>
+                        {jobInfo?.serviceLocationInfo ||
+                          "No service location notes uploaded yet."}
+                      </Text>
+                    </View>
+
+                    <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>
+                        Traffic Management Plan
+                      </Text>
+                      <Text style={styles.jobInfoText}>
+                        {jobInfo?.trafficManagementPlan ||
+                          "No traffic management plan notes uploaded yet."}
+                      </Text>
+                    </View>
+
+                    <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>
+                        Purchase Order Numbers
+                      </Text>
+                      <Text style={styles.jobInfoText}>
+                        {jobInfo?.purchaseOrderNumbers ||
+                          "No purchase order numbers uploaded yet."}
+                      </Text>
+                    </View>
+
+                    <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>Other Details</Text>
+                      <Text style={styles.jobInfoText}>
+                        {jobInfo?.otherDetails || "No other details uploaded yet."}
+                      </Text>
+                    </View>
+
+                    <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>Job Files</Text>
+                      {jobInfo?.files?.length > 0 ? (
+                        jobInfo.files.map((file) => (
+                          <Pressable
+                            key={file.id || file.path || file.filename}
+                            style={styles.jobFileRow}
+                            onPress={() => openJobFile(file)}
+                            accessibilityRole="button"
+                          >
+                            <View style={styles.jobFileIcon}>
+                              <Text style={styles.jobFileIconText}>DOC</Text>
+                            </View>
+                            <View style={styles.jobFileTextWrap}>
+                              <Text style={styles.jobFileName}>
+                                {file.filename || "Job file"}
+                              </Text>
+                              <Text style={styles.jobFileMeta}>
+                                {file.category || "File"}{" "}
+                                {file.uploadedAtIso
+                                  ? `| ${file.uploadedAtIso.slice(0, 10)}`
+                                  : ""}
+                              </Text>
+                            </View>
+                          </Pressable>
+                        ))
+                      ) : (
+                        <Text style={styles.jobInfoText}>
+                          No files uploaded for this job yet.
+                        </Text>
+                      )}
+                    </View>
+                  </>
+                )}
+              </View>
             </>
           )}
 
@@ -6392,6 +6631,71 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 6,
     marginBottom: 10,
+  },
+
+  jobInfoSection: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 14,
+  },
+
+  jobInfoText: {
+    color: "#f5f5f5",
+    fontSize: 15,
+    lineHeight: 22,
+  },
+
+  infoErrorText: {
+    color: "#ff6f6f",
+    fontSize: 14,
+    fontWeight: "800",
+    marginTop: 12,
+  },
+
+  jobFileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#050505",
+    borderColor: "rgba(215,255,47,0.18)",
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 10,
+  },
+
+  jobFileIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: "#D7FF2F",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  jobFileIconText: {
+    color: "#000",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  jobFileTextWrap: {
+    flex: 1,
+  },
+
+  jobFileName: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  jobFileMeta: {
+    color: "#a7a7a7",
+    fontSize: 12,
+    marginTop: 3,
   },
 
   section: {
