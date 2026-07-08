@@ -199,30 +199,222 @@ const publicJobInfo = async (jobRef) => {
   };
 };
 
-const buildReportHtml = ({ reportType, subject, message }) => `
-  <div style="font-family: Arial, sans-serif; color: #111; line-height: 1.45; max-width: 760px;">
-    <div style="border-bottom: 4px solid #d7ff2f; padding-bottom: 14px; margin-bottom: 18px;">
-      <p style="margin: 0; color: #555; font-size: 12px; letter-spacing: 1px; text-transform: uppercase;">
-        Williams Drainage Limited
-      </p>
-      <h2 style="margin: 4px 0 0; font-size: 24px;">${escapeHtml(formatReportHeading(reportType))}</h2>
+const titleCaseWords = (value) =>
+  String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase())
+    .replace(/\bId\b/g, "ID")
+    .replace(/\bPo\b/g, "PO")
+    .replace(/\bDps\b/g, "DPS")
+    .replace(/\bWof\b/g, "WOF")
+    .replace(/\bCof\b/g, "COF")
+    .replace(/\bRuc\b/g, "RUC")
+    .replace(/\bTmp\b/g, "TMP");
+
+const formatReportLabel = (key) => titleCaseWords(key);
+
+const formatReportValue = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        item && typeof item === "object"
+          ? Object.entries(item)
+              .map(([key, nestedValue]) => `${formatReportLabel(key)}: ${formatReportValue(nestedValue)}`)
+              .join(", ")
+          : formatReportValue(item)
+      )
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, nestedValue]) => `${formatReportLabel(key)}: ${formatReportValue(nestedValue)}`)
+      .join("\n");
+  }
+
+  return String(value ?? "").trim() || "Not supplied";
+};
+
+const parseFiledMessage = (message) => {
+  const parsed = {
+    title: "",
+    reference: "",
+    submitted: "",
+    sections: [],
+  };
+  let currentSection = null;
+  let lastRow = null;
+
+  String(message || "")
+    .split(/\r?\n/)
+    .forEach((rawLine) => {
+      const line = rawLine.trimEnd();
+      const trimmed = line.trim();
+
+      if (!trimmed || /^-+$/.test(trimmed) || trimmed === "WILLIAMS DRAINAGE LIMITED") {
+        return;
+      }
+
+      if (trimmed.startsWith("Reference:")) {
+        parsed.reference = trimmed.replace(/^Reference:\s*/, "");
+        lastRow = null;
+        return;
+      }
+
+      if (trimmed.startsWith("Submitted:")) {
+        parsed.submitted = trimmed.replace(/^Submitted:\s*/, "");
+        lastRow = null;
+        return;
+      }
+
+      const isHeading =
+        trimmed === trimmed.toUpperCase() && !trimmed.includes(":") && trimmed.length <= 80;
+
+      if (isHeading && !parsed.title) {
+        parsed.title = titleCaseWords(trimmed);
+        lastRow = null;
+        return;
+      }
+
+      if (isHeading) {
+        currentSection = {
+          title: titleCaseWords(trimmed),
+          rows: [],
+        };
+        parsed.sections.push(currentSection);
+        lastRow = null;
+        return;
+      }
+
+      const rowMatch = trimmed.match(/^([^:]{1,90}):\s*(.*)$/);
+
+      if (rowMatch) {
+        if (!currentSection) {
+          currentSection = { title: "Details", rows: [] };
+          parsed.sections.push(currentSection);
+        }
+
+        lastRow = {
+          label: rowMatch[1].trim(),
+          value: rowMatch[2].trim() || "Not supplied",
+        };
+        currentSection.rows.push(lastRow);
+        return;
+      }
+
+      if (lastRow) {
+        lastRow.value = `${lastRow.value}\n${trimmed}`.trim();
+      }
+    });
+
+  return parsed;
+};
+
+const buildRowsHtml = (rows) =>
+  rows
+    .map(
+      (row) => `
+        <tr>
+          <td style="width: 34%; padding: 10px 12px; border-bottom: 1px solid #e7e7e7; color: #596067; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;">${escapeHtml(formatReportLabel(row.label))}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e7e7e7; color: #151515; font-size: 14px; white-space: pre-line;">${escapeHtml(formatReportValue(row.value))}</td>
+        </tr>`
+    )
+    .join("");
+
+const buildSectionHtml = (section) => `
+  <div style="margin: 18px 0 0; border: 1px solid #dedede; border-radius: 8px; overflow: hidden; background: #ffffff;">
+    <div style="background: #101010; border-left: 6px solid #d7ff2f; padding: 12px 14px;">
+      <h3 style="margin: 0; color: #d7ff2f; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase;">${escapeHtml(section.title)}</h3>
     </div>
-
-    <table style="border-collapse: collapse; width: 100%; margin-bottom: 18px;">
-      <tr>
-        <td style="padding: 9px 10px; border: 1px solid #ddd; font-weight: bold; width: 34%;">Subject</td>
-        <td style="padding: 9px 10px; border: 1px solid #ddd;">${escapeHtml(subject)}</td>
-      </tr>
+    <table role="presentation" style="width: 100%; border-collapse: collapse;">
+      ${buildRowsHtml(section.rows)}
     </table>
-
-    <h3 style="margin: 18px 0 8px; font-size: 16px;">Filed Report</h3>
-    <pre style="background: #f7f7f7; border: 1px solid #ddd; padding: 14px; white-space: pre-wrap; font-family: Consolas, monospace; font-size: 13px;">${escapeHtml(message)}</pre>
-
-    <p style="margin-top: 18px; color: #666; font-size: 12px;">
-      Submitted from the WDL Field Forms app.
-    </p>
   </div>
 `;
+
+const buildFieldsFallbackHtml = (fields) => {
+  const rows = Object.entries(fields || {}).map(([label, value]) => ({ label, value }));
+
+  if (!rows.length) return "";
+
+  return buildSectionHtml({
+    title: "Report Details",
+    rows,
+  });
+};
+
+const buildAttachmentSummaryHtml = (attachments) => {
+  if (!attachments.length) return "";
+
+  const rows = attachments.map((attachment, index) => ({
+    label: `Attachment ${index + 1}`,
+    value: attachment.filename || `Photo ${index + 1}`,
+  }));
+
+  return buildSectionHtml({
+    title: "Attachments",
+    rows,
+  });
+};
+
+const buildReportHtml = ({ reportType, subject, message, fields = {}, attachments = [] }) => {
+  const parsed = parseFiledMessage(message);
+  const heading = formatReportHeading(reportType);
+  const sectionsHtml =
+    parsed.sections.length > 0
+      ? parsed.sections.map(buildSectionHtml).join("")
+      : buildFieldsFallbackHtml(fields);
+  const reference = parsed.reference || fields.reference || fields.po_number || fields.job_number || "";
+  const submitted = parsed.submitted || fields.submitted_at || "";
+
+  return `
+    <div style="margin: 0; padding: 24px; background: #f2f4f1; font-family: Arial, sans-serif; color: #141414; line-height: 1.45;">
+      <div style="max-width: 820px; margin: 0 auto; background: #ffffff; border: 1px solid #d9ddd2; border-radius: 10px; overflow: hidden;">
+        <div style="background: #080808; padding: 22px 26px 18px; border-bottom: 6px solid #d7ff2f;">
+          <p style="margin: 0 0 8px; color: #d7ff2f; font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase;">Williams Drainage Limited</p>
+          <h1 style="margin: 0; color: #ffffff; font-size: 28px; line-height: 1.12;">${escapeHtml(heading)}</h1>
+          <p style="margin: 10px 0 0; color: #c9c9c9; font-size: 14px;">${escapeHtml(subject)}</p>
+        </div>
+
+        <div style="padding: 20px 26px 26px;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 4px;">
+            <tr>
+              <td style="padding: 10px 12px; background: #f7f8f4; border: 1px solid #e0e3dc; color: #5b6258; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;">Report</td>
+              <td style="padding: 10px 12px; background: #f7f8f4; border: 1px solid #e0e3dc; color: #111111; font-size: 14px;">${escapeHtml(heading)}</td>
+            </tr>
+            ${
+              reference
+                ? `<tr>
+                    <td style="padding: 10px 12px; border: 1px solid #e0e3dc; color: #5b6258; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;">Reference</td>
+                    <td style="padding: 10px 12px; border: 1px solid #e0e3dc; color: #111111; font-size: 14px;">${escapeHtml(reference)}</td>
+                  </tr>`
+                : ""
+            }
+            ${
+              submitted
+                ? `<tr>
+                    <td style="padding: 10px 12px; border: 1px solid #e0e3dc; color: #5b6258; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;">Submitted</td>
+                    <td style="padding: 10px 12px; border: 1px solid #e0e3dc; color: #111111; font-size: 14px;">${escapeHtml(submitted)}</td>
+                  </tr>`
+                : ""
+            }
+          </table>
+
+          ${sectionsHtml}
+          ${buildAttachmentSummaryHtml(attachments)}
+
+          <p style="margin: 22px 0 0; color: #777777; font-size: 12px;">
+            Filed from the WDL Field Forms app.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+};
 
 const normaliseAttachments = (attachments = []) => {
   if (!Array.isArray(attachments)) return [];
@@ -729,7 +921,7 @@ exports.sendReport = onRequest(
         replyTo: smtpReplyTo,
         subject,
         text: message,
-        html: buildReportHtml({ reportType, subject, message }),
+        html: buildReportHtml({ reportType, subject, message, fields, attachments }),
         attachments,
       });
       const reportRef = await getFirestore().collection("reports").add(

@@ -77,6 +77,46 @@ const reportMeta = (report) =>
     .map(escapeHtml)
     .join(" | ");
 
+const titleCaseWords = (value) =>
+  String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase())
+    .replace(/\bId\b/g, "ID")
+    .replace(/\bPo\b/g, "PO")
+    .replace(/\bDps\b/g, "DPS")
+    .replace(/\bWof\b/g, "WOF")
+    .replace(/\bCof\b/g, "COF")
+    .replace(/\bRuc\b/g, "RUC")
+    .replace(/\bTmp\b/g, "TMP");
+
+const formatReportLabel = (key) => titleCaseWords(key);
+
+const formatReportValue = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        item && typeof item === "object"
+          ? Object.entries(item)
+              .map(([key, nestedValue]) => `${formatReportLabel(key)}: ${formatReportValue(nestedValue)}`)
+              .join(", ")
+          : formatReportValue(item)
+      )
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, nestedValue]) => `${formatReportLabel(key)}: ${formatReportValue(nestedValue)}`)
+      .join("\n");
+  }
+
+  return String(value ?? "").trim() || "Not supplied";
+};
+
 const renderMetrics = () => {
   $("#reportCount").textContent = state.reports.length;
   $("#chargeUpCount").textContent = state.chargeUpReports.length;
@@ -331,11 +371,42 @@ const detailRows = (report) =>
     .map(
       ([key, value]) => `
         <tr>
-          <th>${escapeHtml(key.replace(/_/g, " "))}</th>
-          <td>${escapeHtml(value)}</td>
+          <th>${escapeHtml(formatReportLabel(key))}</th>
+          <td>${escapeHtml(formatReportValue(value))}</td>
         </tr>`
     )
     .join("");
+
+const attachmentRows = (report) =>
+  (report.attachmentSummary || [])
+    .map(
+      (attachment, index) => `
+        <tr>
+          <th>Attachment ${index + 1}</th>
+          <td>${escapeHtml(attachment.filename || `File ${index + 1}`)}</td>
+        </tr>`
+    )
+    .join("");
+
+const reportSummaryHtml = (report) => `
+  <section class="report-summary-grid">
+    <article>
+      <span>Report</span>
+      <strong>${escapeHtml(report.reportType || "Report")}</strong>
+    </article>
+    <article>
+      <span>Submitted</span>
+      <strong>${escapeHtml(formatDate(report.submittedAtIso))}</strong>
+    </article>
+    <article>
+      <span>Job / Site</span>
+      <strong>${escapeHtml(report.jobName || report.siteAddress || report.jobNumber || "Not supplied")}</strong>
+    </article>
+    <article>
+      <span>Status</span>
+      <strong>${escapeHtml(report.status || "Filed")}</strong>
+    </article>
+  </section>`;
 
 const printableHtml = (report) => `
 <!doctype html>
@@ -343,21 +414,57 @@ const printableHtml = (report) => `
   <head>
     <title>${escapeHtml(report.subject || report.reportType)}</title>
     <style>
-      body { font-family: Arial, sans-serif; color: #111; margin: 28px; }
-      h1 { border-bottom: 4px solid #d7ff2f; padding-bottom: 10px; }
-      table { border-collapse: collapse; width: 100%; margin-top: 18px; }
-      th, td { border: 1px solid #ccc; padding: 9px; text-align: left; vertical-align: top; }
-      th { width: 30%; background: #f3f5f0; }
-      pre { white-space: pre-wrap; border: 1px solid #ccc; padding: 14px; }
+      * { box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; color: #111; margin: 0; background: #f2f4f1; }
+      .page { max-width: 920px; margin: 24px auto; background: #fff; border: 1px solid #d8ddd3; }
+      header { background: #080808; color: #fff; padding: 24px 28px 20px; border-bottom: 7px solid #d7ff2f; }
+      .eyebrow { margin: 0 0 8px; color: #d7ff2f; font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
+      h1 { margin: 0; font-size: 30px; line-height: 1.1; }
+      header p:last-child { margin: 10px 0 0; color: #d7d7d7; }
+      main { padding: 24px 28px 30px; }
+      .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 22px; }
+      .summary article { border: 1px solid #dde2d8; background: #f7f8f4; padding: 10px; }
+      .summary span { display: block; color: #60685d; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+      .summary strong { display: block; margin-top: 4px; font-size: 13px; }
+      h2 { margin: 24px 0 8px; padding: 10px 12px; background: #101010; border-left: 7px solid #d7ff2f; color: #d7ff2f; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #e3e3e3; padding: 9px 10px; text-align: left; vertical-align: top; white-space: pre-line; }
+      th { width: 32%; color: #596067; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+      td { font-size: 13px; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #ddd; background: #f8f8f8; padding: 14px; font-size: 12px; }
+      footer { margin-top: 20px; color: #777; font-size: 11px; }
+      @media print {
+        body { background: #fff; }
+        .page { margin: 0; border: 0; max-width: none; }
+      }
     </style>
   </head>
   <body>
-    <h1>${escapeHtml(report.reportType)}</h1>
-    <p><strong>Subject:</strong> ${escapeHtml(report.subject)}</p>
-    <p><strong>Submitted:</strong> ${escapeHtml(formatDate(report.submittedAtIso))}</p>
-    <table>${detailRows(report)}</table>
-    <h2>Filed Report</h2>
-    <pre>${escapeHtml(report.message || "")}</pre>
+    <div class="page">
+      <header>
+        <p class="eyebrow">Williams Drainage Limited</p>
+        <h1>${escapeHtml(report.reportType || "Report")}</h1>
+        <p>${escapeHtml(report.subject || "")}</p>
+      </header>
+      <main>
+        <section class="summary">
+          <article><span>Report</span><strong>${escapeHtml(report.reportType || "Report")}</strong></article>
+          <article><span>Submitted</span><strong>${escapeHtml(formatDate(report.submittedAtIso))}</strong></article>
+          <article><span>Job / Site</span><strong>${escapeHtml(report.jobName || report.siteAddress || report.jobNumber || "Not supplied")}</strong></article>
+          <article><span>Status</span><strong>${escapeHtml(report.status || "Filed")}</strong></article>
+        </section>
+        <h2>Report Details</h2>
+        <table>${detailRows(report) || "<tr><td>No extra fields supplied.</td></tr>"}</table>
+        ${
+          attachmentRows(report)
+            ? `<h2>Attachments</h2><table>${attachmentRows(report)}</table>`
+            : ""
+        }
+        <h2>Plain Filed Copy</h2>
+        <pre>${escapeHtml(report.message || "")}</pre>
+        <footer>Filed from the WDL Field Forms app.</footer>
+      </main>
+    </div>
   </body>
 </html>`;
 
@@ -372,11 +479,23 @@ const openReport = (reportId) => {
       <button type="button" id="printReport">Print / Save PDF</button>
       <button type="button" id="downloadReport">Download HTML</button>
     </div>
-    <h2>${escapeHtml(report.subject || report.reportType)}</h2>
-    <p class="meta">${reportMeta(report)}</p>
-    <table class="detail-table">${detailRows(report)}</table>
-    <h3>Filed Report</h3>
-    <pre>${escapeHtml(report.message || "")}</pre>`;
+    <article class="report-preview">
+      <header>
+        <span>Williams Drainage Limited</span>
+        <h2>${escapeHtml(report.subject || report.reportType)}</h2>
+        <p>${reportMeta(report)}</p>
+      </header>
+      ${reportSummaryHtml(report)}
+      <h3>Report Details</h3>
+      <table class="detail-table">${detailRows(report) || "<tr><td>No extra fields supplied.</td></tr>"}</table>
+      ${
+        attachmentRows(report)
+          ? `<h3>Attachments</h3><table class="detail-table">${attachmentRows(report)}</table>`
+          : ""
+      }
+      <h3>Plain Filed Copy</h3>
+      <pre>${escapeHtml(report.message || "")}</pre>
+    </article>`;
   $("#reportDrawer").setAttribute("aria-hidden", "false");
 };
 
