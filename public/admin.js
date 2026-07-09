@@ -18,6 +18,21 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
+const setText = (selector, value) => {
+  const element = $(selector);
+  if (element) element.textContent = value;
+};
+
+const setValue = (selector, value) => {
+  const element = $(selector);
+  if (element) element.value = value;
+};
+
+const setHtml = (selector, value) => {
+  const element = $(selector);
+  if (element) element.innerHTML = value;
+};
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -118,10 +133,10 @@ const formatReportValue = (value) => {
 };
 
 const renderMetrics = () => {
-  $("#reportCount").textContent = state.reports.length;
-  $("#chargeUpCount").textContent = state.chargeUpReports.length;
-  $("#hazardCount").textContent = state.hazardReports.length;
-  $("#jobCount").textContent = state.jobs.length;
+  setText("#reportCount", state.reports.length);
+  setText("#chargeUpCount", state.chargeUpReports.length);
+  setText("#hazardCount", state.hazardReports.length);
+  setText("#jobCount", state.jobs.length);
 };
 
 const renderReports = () => {
@@ -230,23 +245,28 @@ const renderSelectedJobInfo = () => {
   const selectedJob = state.jobs.find((job) => job.number === state.selectedJobNumber);
   const jobInfo = state.selectedJobInfo || {};
 
-  $("#selectedJobTitle").textContent = selectedJob
-    ? `${selectedJob.number} - ${selectedJob.name}`
-    : "Select a job";
-  $("#selectedJobMeta").textContent = selectedJob
-    ? "Office notes and files shown here are available in the field app."
-    : "Choose a job to manage notes and files.";
+  setText(
+    "#selectedJobTitle",
+    selectedJob ? `${selectedJob.number} - ${selectedJob.name}` : "Select a job"
+  );
+  setText(
+    "#selectedJobMeta",
+    selectedJob
+      ? "Office notes and files shown here are available in the field app."
+      : "Choose a job to manage notes and files."
+  );
 
-  $("#jobNotes").value = jobInfo.notes || "";
-  $("#serviceLocationInfo").value = jobInfo.serviceLocationInfo || "";
-  $("#trafficManagementPlan").value = jobInfo.trafficManagementPlan || "";
-  $("#purchaseOrderNumbers").value = jobInfo.purchaseOrderNumbers || "";
-  $("#jobContacts").value = jobInfo.contacts || "";
-  $("#otherDetails").value = jobInfo.otherDetails || "";
+  setValue("#jobNotes", jobInfo.notes || "");
+  setValue("#serviceLocationInfo", jobInfo.serviceLocationInfo || "");
+  setValue("#trafficManagementPlan", jobInfo.trafficManagementPlan || "");
+  setValue("#purchaseOrderNumbers", jobInfo.purchaseOrderNumbers || "");
+  setValue("#jobContacts", jobInfo.contacts || "");
+  setValue("#otherDetails", jobInfo.otherDetails || "");
 
   setJobEditorDisabled(!selectedJob);
 
-  $("#jobFilesList").innerHTML =
+  setHtml(
+    "#jobFilesList",
     jobInfo.files?.length > 0
       ? jobInfo.files
           .map(
@@ -274,7 +294,8 @@ const renderSelectedJobInfo = () => {
               </article>`
           )
           .join("")
-      : '<div class="empty">No files uploaded for this job yet.</div>';
+      : '<div class="empty">No files uploaded for this job yet.</div>'
+  );
 };
 
 const selectJob = async (jobNumber) => {
@@ -320,7 +341,13 @@ const fileToBase64 = (file) =>
   });
 
 const uploadFiles = async (files) => {
-  if (!state.selectedJobNumber || !files.length) return;
+  if (!files.length) return;
+
+  if (!state.selectedJobNumber) {
+    alert("Select a job before uploading files.");
+    setValue("#jobFileInput", "");
+    return;
+  }
 
   const selectedJob = state.jobs.find((job) => job.number === state.selectedJobNumber);
 
@@ -343,8 +370,8 @@ const uploadFiles = async (files) => {
     state.selectedJobInfo = payload.job || null;
   }
 
-  $("#jobFileInput").value = "";
-  $("#fileNotes").value = "";
+  setValue("#jobFileInput", "");
+  setValue("#fileNotes", "");
   renderSelectedJobInfo();
 };
 
