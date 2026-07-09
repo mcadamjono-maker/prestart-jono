@@ -617,6 +617,27 @@ h2 {
   color: var(--accent);
 }
 
+.signon {
+  border-left-color: var(--accent);
+  background: rgba(215, 255, 47, 0.08);
+  border: 1px solid rgba(215, 255, 47, 0.2);
+  border-left-width: 5px;
+  color: var(--ink);
+}
+
+.signon strong {
+  display: block;
+  color: #ffffff;
+}
+
+.signon div {
+  color: var(--ink);
+}
+
+.signon small {
+  color: var(--muted);
+}
+
 .job-workspace {
   display: grid;
   grid-template-columns: minmax(240px, 330px) 1fr;
