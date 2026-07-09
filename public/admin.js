@@ -33,6 +33,26 @@ const setHtml = (selector, value) => {
   if (element) element.innerHTML = value;
 };
 
+const setDisabled = (selector, isDisabled) => {
+  const element = $(selector);
+  if (element) element.disabled = isDisabled;
+};
+
+const setAttributeSafe = (selector, name, value) => {
+  const element = $(selector);
+  if (element) element.setAttribute(name, value);
+};
+
+const addClassSafe = (selector, className) => {
+  const element = $(selector);
+  if (element) element.classList.add(className);
+};
+
+const removeClassSafe = (selector, className) => {
+  const element = $(selector);
+  if (element) element.classList.remove(className);
+};
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -148,7 +168,8 @@ const renderReports = () => {
     return (!type || report.reportType === type) && (!search || haystack.includes(search));
   });
 
-  $("#reportsList").innerHTML =
+  setHtml(
+    "#reportsList",
     filtered
       .map(
         (report) => `
@@ -163,7 +184,8 @@ const renderReports = () => {
             </div>
           </article>`
       )
-      .join("") || emptyHtml();
+      .join("") || emptyHtml()
+  );
 };
 
 const getWeekDates = (weekStart) => {
@@ -181,32 +203,36 @@ const renderCalendar = () => {
   const days = getWeekDates(weekStart);
   const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-  $("#calendarGrid").innerHTML = days
-    .map((date, index) => {
-      const entries = state.calendarEntries.filter((entry) => entry.date === date);
+  setHtml(
+    "#calendarGrid",
+    days
+      .map((date, index) => {
+        const entries = state.calendarEntries.filter((entry) => entry.date === date);
 
-      return `
-        <section class="day">
-          <h3>${dayLabels[index]}<br />${date}</h3>
-          ${
-            entries
-              .map(
-                (entry) => `
-                  <div class="signon">
-                    <strong>${escapeHtml(entry.name)}</strong>
-                    <div>${escapeHtml(entry.jobName || entry.siteAddress || "Job")}</div>
-                    <small>${escapeHtml(entry.signedAt || "")}</small>
-                  </div>`
-              )
-              .join("") || '<div class="empty">No sign-ons</div>'
-          }
-        </section>`;
-    })
-    .join("");
+        return `
+          <section class="day">
+            <h3>${dayLabels[index]}<br />${date}</h3>
+            ${
+              entries
+                .map(
+                  (entry) => `
+                    <div class="signon">
+                      <strong>${escapeHtml(entry.name)}</strong>
+                      <div>${escapeHtml(entry.jobName || entry.siteAddress || "Job")}</div>
+                      <small>${escapeHtml(entry.signedAt || "")}</small>
+                    </div>`
+                )
+                .join("") || '<div class="empty">No sign-ons</div>'
+            }
+          </section>`;
+      })
+      .join("")
+  );
 };
 
 const renderJobs = () => {
-  $("#jobsList").innerHTML =
+  setHtml(
+    "#jobsList",
     state.jobs
       .map(
         (job) => `
@@ -219,7 +245,8 @@ const renderJobs = () => {
             <span>${escapeHtml(job.name)}</span>
           </button>`
       )
-      .join("") || emptyHtml();
+      .join("") || emptyHtml()
+  );
 };
 
 const setJobEditorDisabled = (isDisabled) => {
@@ -236,8 +263,7 @@ const setJobEditorDisabled = (isDisabled) => {
     "#fileCategory",
     "#fileNotes",
   ].forEach((selector) => {
-    const element = $(selector);
-    if (element) element.disabled = isDisabled;
+    setDisabled(selector, isDisabled);
   });
 };
 
@@ -302,7 +328,7 @@ const selectJob = async (jobNumber) => {
   state.selectedJobNumber = jobNumber;
   renderJobs();
   setJobEditorDisabled(true);
-  $("#jobFilesList").innerHTML = '<div class="empty">Loading job information...</div>';
+  setHtml("#jobFilesList", '<div class="empty">Loading job information...</div>');
 
   const payload = await jobInfoFetch(`?jobNumber=${encodeURIComponent(jobNumber)}`);
   state.selectedJobInfo = payload.job || null;
@@ -501,7 +527,9 @@ const openReport = (reportId) => {
   if (!report) return;
 
   state.selectedReport = report;
-  $("#reportDetail").innerHTML = `
+  setHtml(
+    "#reportDetail",
+    `
     <div class="print-actions">
       <button type="button" id="printReport">Print / Save PDF</button>
       <button type="button" id="downloadReport">Download HTML</button>
@@ -522,12 +550,13 @@ const openReport = (reportId) => {
       }
       <h3>Plain Filed Copy</h3>
       <pre>${escapeHtml(report.message || "")}</pre>
-    </article>`;
-  $("#reportDrawer").setAttribute("aria-hidden", "false");
+    </article>`
+  );
+  setAttributeSafe("#reportDrawer", "aria-hidden", "false");
 };
 
 const closeReport = () => {
-  $("#reportDrawer").setAttribute("aria-hidden", "true");
+  setAttributeSafe("#reportDrawer", "aria-hidden", "true");
   state.selectedReport = null;
 };
 
@@ -571,8 +600,8 @@ const addJob = async (event) => {
 
   state.jobs = [...state.jobs.filter((job) => job.number !== payload.job.number), payload.job]
     .sort((a, b) => a.number.localeCompare(b.number));
-  $("#jobNumber").value = "";
-  $("#jobName").value = "";
+  setValue("#jobNumber", "");
+  setValue("#jobName", "");
   renderMetrics();
   renderJobs();
 };
@@ -582,11 +611,13 @@ const initialiseWeek = () => {
   const day = today.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   today.setDate(today.getDate() + diffToMonday);
-  $("#calendarWeek").value = today.toISOString().slice(0, 10);
+  setValue("#calendarWeek", today.toISOString().slice(0, 10));
 };
 
 const init = () => {
-  $("#accessCode").value = getAccessCode();
+  if (!$("#accessCode")) return;
+
+  setValue("#accessCode", getAccessCode());
   initialiseWeek();
   renderSelectedJobInfo();
 
@@ -615,14 +646,14 @@ const init = () => {
   ["dragenter", "dragover"].forEach((eventName) => {
     $("#dropZone").addEventListener(eventName, (event) => {
       event.preventDefault();
-      $("#dropZone").classList.add("dragging");
+      addClassSafe("#dropZone", "dragging");
     });
   });
 
   ["dragleave", "drop"].forEach((eventName) => {
     $("#dropZone").addEventListener(eventName, (event) => {
       event.preventDefault();
-      $("#dropZone").classList.remove("dragging");
+      removeClassSafe("#dropZone", "dragging");
     });
   });
 
@@ -637,7 +668,7 @@ const init = () => {
       $$(".tabs button").forEach((item) => item.classList.remove("active"));
       $$(".panel").forEach((panel) => panel.classList.remove("active"));
       button.classList.add("active");
-      $(`#${button.dataset.tab}`).classList.add("active");
+      addClassSafe(`#${button.dataset.tab}`, "active");
     });
   });
 
