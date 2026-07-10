@@ -23,6 +23,7 @@ import {
 } from "react-native-safe-area-context";
 import Svg, {
   Circle,
+  G,
   Line,
   Path,
   Polyline,
@@ -881,7 +882,12 @@ const buildAsBuiltSvg = ({
   mapUrl,
   mapScale,
   mapOffset,
+  boardSize,
 }) => {
+  const boardAspectRatio = Math.max(
+    1,
+    (Number(boardSize?.height) || 1) / Math.max(Number(boardSize?.width) || 1, 1)
+  );
   const lineMarkup = lines
     .map((line) => {
       const strokeWidth = getAsBuiltWidth(line.width);
@@ -896,7 +902,19 @@ const buildAsBuiltSvg = ({
     })
     .join("\n");
   const symbolMarkup = symbols
-    .map((symbol) => buildAsBuiltSymbolMarkup(symbol))
+    .map((symbol) => {
+      const symbolX = Number(symbol.x) || 0;
+      const symbolY = Number(symbol.y) || 0;
+      const symbolScaleY = (1 / boardAspectRatio).toFixed(4);
+
+      return `<g transform="translate(${symbolX.toFixed(
+        2
+      )} ${symbolY.toFixed(2)}) scale(1 ${symbolScaleY}) translate(${(
+        -symbolX
+      ).toFixed(2)} ${(-symbolY).toFixed(2)})">${buildAsBuiltSymbolMarkup(
+        symbol
+      )}</g>`;
+    })
     .join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -979,7 +997,11 @@ const buildAsBuiltSvg = ({
 </svg>`;
 };
 
-const buildAsBuiltPlanOnlySvg = ({ lines, symbols }) => {
+const buildAsBuiltPlanOnlySvg = ({ lines, symbols, boardSize }) => {
+  const boardAspectRatio = Math.max(
+    1,
+    (Number(boardSize?.height) || 1) / Math.max(Number(boardSize?.width) || 1, 1)
+  );
   const lineMarkup = lines
     .map((line) => {
       const strokeWidth = getAsBuiltWidth(line.width);
@@ -994,10 +1016,22 @@ const buildAsBuiltPlanOnlySvg = ({ lines, symbols }) => {
     })
     .join("\n");
   const symbolMarkup = symbols
-    .map((symbol) => buildAsBuiltSymbolMarkup(symbol))
+    .map((symbol) => {
+      const symbolX = Number(symbol.x) || 0;
+      const symbolY = Number(symbol.y) || 0;
+      const symbolScaleY = (1 / boardAspectRatio).toFixed(4);
+
+      return `<g transform="translate(${symbolX.toFixed(
+        2
+      )} ${symbolY.toFixed(2)}) scale(1 ${symbolScaleY}) translate(${(
+        -symbolX
+      ).toFixed(2)} ${(-symbolY).toFixed(2)})">${buildAsBuiltSymbolMarkup(
+        symbol
+      )}</g>`;
+    })
     .join("\n");
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">
     <defs>
       <marker id="arrowhead" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
         <path d="M0,0 L5,2.5 L0,5 Z" fill="#b92b2b" />
@@ -1033,10 +1067,13 @@ const buildAsBuiltPdfHtml = ({
   boardSize,
   drainlayerSignatureStrokes,
 }) => {
-  const planWidth = 780;
-  const planHeight = 405;
   const boardWidth = Math.max(boardSize?.width || 1, 1);
   const boardHeight = Math.max(boardSize?.height || 1, 1);
+  const boardAspectRatio = Math.max(1, boardHeight / boardWidth);
+  const maxPlanWidth = 540;
+  const maxPlanHeight = 610;
+  const planWidth = Math.min(maxPlanWidth, maxPlanHeight / boardAspectRatio);
+  const planHeight = planWidth * boardAspectRatio;
   const mapTranslateX = ((mapOffset?.x || 0) / boardWidth) * planWidth;
   const mapTranslateY = ((mapOffset?.y || 0) / boardHeight) * planHeight;
   const fieldMarkup = fieldRows
@@ -1058,7 +1095,7 @@ const buildAsBuiltPdfHtml = ({
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       @page {
-        size: A4 landscape;
+        size: A4 portrait;
         margin: 18px;
       }
 
@@ -1101,7 +1138,7 @@ const buildAsBuiltPdfHtml = ({
 
       .fields {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 5px 9px;
         margin-bottom: 8px;
       }
@@ -1150,6 +1187,7 @@ const buildAsBuiltPdfHtml = ({
         position: relative;
         width: ${planWidth}px;
         height: ${planHeight}px;
+        margin: 0 auto;
         overflow: hidden;
         border: 2px solid #111111;
         background: #f7f7f7;
@@ -3784,6 +3822,7 @@ export default function App() {
       const planSvg = buildAsBuiltPlanOnlySvg({
         lines: asBuiltLines,
         symbols: asBuiltSymbols,
+        boardSize: asBuiltBoardSize,
       });
       const mapImageBase64 = await getMapImageBase64(asBuiltMapImageUrl);
       const planAttachment = IS_WEB
@@ -3806,6 +3845,7 @@ export default function App() {
               mapUrl: asBuiltMapImageUrl,
               mapScale: asBuiltMapScale,
               mapOffset: asBuiltMapOffset,
+              boardSize: asBuiltBoardSize,
             }),
             contentType: "image/svg+xml",
           })
@@ -4750,14 +4790,13 @@ export default function App() {
   );
 
   const renderAsBuiltBoard = (fullScreen = false) => {
-    const fullScreenBoardSize = Math.max(
-      300,
-      Math.min(windowDimensions.width - 16, windowDimensions.height - 142)
-    );
-    const boardWidth = fullScreen ? fullScreenBoardSize : asBuiltBoardPixelSize;
-    const boardHeight = fullScreen
-      ? fullScreenBoardSize
+    const boardWidth = fullScreen
+      ? Math.max(320, windowDimensions.width - 16)
       : asBuiltBoardPixelSize;
+    const boardHeight = fullScreen
+      ? Math.max(460, windowDimensions.height - 142)
+      : asBuiltBoardPixelSize;
+    const boardAspectRatio = Math.max(1, boardHeight / boardWidth);
 
     return (
       <View
@@ -4859,7 +4898,14 @@ export default function App() {
           )}
 
           {asBuiltSymbols.map((symbol) => (
-            <StableAsBuiltSymbol key={symbol.id} symbol={symbol} />
+            <G
+              key={symbol.id}
+              transform={`translate(${symbol.x} ${symbol.y}) scale(1 ${
+                1 / boardAspectRatio
+              }) translate(${-symbol.x} ${-symbol.y})`}
+            >
+              <StableAsBuiltSymbol symbol={symbol} />
+            </G>
           ))}
         </Svg>
 
@@ -6368,37 +6414,15 @@ export default function App() {
                 />
 
                 <Pressable
-                  style={styles.asBuiltFocusButton}
-                  onPress={() => setIsAsBuiltFocused((current) => !current)}
+                  style={styles.asBuiltOpenEditorButton}
+                  onPress={() => setIsAsBuiltFocused(true)}
                   disabled={isSubmitting}
                   accessibilityRole="button"
                 >
-                  <Text style={styles.asBuiltFocusButtonText}>
-                    {isAsBuiltFocused ? "EXIT FULL SCREEN" : "EDIT FULL SCREEN"}
+                  <Text style={styles.asBuiltOpenEditorButtonText}>
+                    OPEN DRAWING EDITOR
                   </Text>
                 </Pressable>
-
-                {renderAsBuiltBoard(false)}
-
-                <View style={styles.asBuiltBoardActions}>
-                  <Pressable
-                    style={styles.secondaryButton}
-                    onPress={undoAsBuiltMark}
-                    disabled={isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.secondaryButtonText}>UNDO</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={styles.secondaryButton}
-                    onPress={clearAsBuiltDrawing}
-                    disabled={isSubmitting}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.secondaryButtonText}>CLEAR DRAWING</Text>
-                  </Pressable>
-                </View>
 
                 <Modal
                   animationType="slide"
@@ -7495,6 +7519,23 @@ const styles = StyleSheet.create({
     borderColor: "#2b2b2b",
     paddingVertical: 12,
     alignItems: "center",
+  },
+
+  asBuiltOpenEditorButton: {
+    backgroundColor: "#D7FF2F",
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+    marginBottom: 12,
+  },
+
+  asBuiltOpenEditorButtonText: {
+    color: "#000",
+    fontSize: 16,
+    fontWeight: "900",
   },
 
   asBuiltFocusButton: {
