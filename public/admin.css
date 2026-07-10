@@ -448,6 +448,43 @@ pre {
   text-transform: uppercase;
 }
 
+.signature-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 14px 18px;
+}
+
+.signature-card {
+  width: 240px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.signature-card strong,
+.signature-card span {
+  display: block;
+}
+
+.signature-card span {
+  margin: 2px 0 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.report-signature {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: 82px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 .report-preview pre {
   margin: 0 14px 16px;
 }

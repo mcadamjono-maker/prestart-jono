@@ -241,6 +241,77 @@ const formatReportValue = (value) => {
   return String(value ?? "").trim() || "Not supplied";
 };
 
+const buildSignaturePolylineMarkup = (strokes = []) =>
+  (Array.isArray(strokes) ? strokes : [])
+    .filter((stroke) => Array.isArray(stroke) && stroke.length > 1)
+    .map((stroke) => {
+      const points = stroke
+        .map((point) => {
+          const x = Math.max(0, Math.min(100, Number(point?.x) || 0));
+          const y = Math.max(0, Math.min(100, Number(point?.y) || 0));
+
+          return `${x.toFixed(2)},${y.toFixed(2)}`;
+        })
+        .join(" ");
+
+      return `<polyline points="${points}" fill="none" stroke="#111111" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" />`;
+    })
+    .join("");
+
+const buildSignatureSvgHtml = (strokes = []) => {
+  const markup = buildSignaturePolylineMarkup(strokes);
+
+  if (!markup) return "";
+
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="display:block; width:220px; max-width:100%; height:82px; background:#ffffff; border:1px solid #d8d8d8; border-radius:6px;">${markup}</svg>`;
+};
+
+const buildSignatureSectionsHtml = (formData = {}) => {
+  const sections = [];
+  const drainlayerSignature = buildSignatureSvgHtml(
+    formData.drainlayerSignatureStrokes
+  );
+
+  if (drainlayerSignature) {
+    sections.push(`
+      <div style="margin: 18px 0 0; border: 1px solid #dedede; border-radius: 8px; overflow: hidden; background: #ffffff;">
+        <div style="background: #101010; border-left: 6px solid #d7ff2f; padding: 12px 14px;">
+          <h3 style="margin: 0; color: #d7ff2f; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase;">Drainlayer Signature</h3>
+        </div>
+        <div style="padding: 14px;">${drainlayerSignature}</div>
+      </div>`);
+  }
+
+  const signOns = Array.isArray(formData.signOns) ? formData.signOns : [];
+  const signOnCards = signOns
+    .map((signOn) => {
+      const signature = buildSignatureSvgHtml(signOn?.signatureStrokes);
+
+      if (!signature) return "";
+
+      return `
+        <div style="display:inline-block; vertical-align:top; width:240px; max-width:100%; margin:0 12px 12px 0;">
+          <div style="font-size:13px; font-weight:800; color:#111111;">${escapeHtml(signOn?.name || "Worker")}</div>
+          <div style="font-size:11px; color:#666666; margin:2px 0 6px;">${escapeHtml(signOn?.signedAt || "")}</div>
+          ${signature}
+        </div>`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  if (signOnCards) {
+    sections.push(`
+      <div style="margin: 18px 0 0; border: 1px solid #dedede; border-radius: 8px; overflow: hidden; background: #ffffff;">
+        <div style="background: #101010; border-left: 6px solid #d7ff2f; padding: 12px 14px;">
+          <h3 style="margin: 0; color: #d7ff2f; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase;">Worker Signatures</h3>
+        </div>
+        <div style="padding: 14px;">${signOnCards}</div>
+      </div>`);
+  }
+
+  return sections.join("");
+};
+
 const parseFiledMessage = (message) => {
   const parsed = {
     title: "",
@@ -363,7 +434,14 @@ const buildAttachmentSummaryHtml = (attachments) => {
   });
 };
 
-const buildReportHtml = ({ reportType, subject, message, fields = {}, attachments = [] }) => {
+const buildReportHtml = ({
+  reportType,
+  subject,
+  message,
+  fields = {},
+  formData = {},
+  attachments = [],
+}) => {
   const parsed = parseFiledMessage(message);
   const heading = formatReportHeading(reportType);
   const sectionsHtml =
@@ -407,6 +485,7 @@ const buildReportHtml = ({ reportType, subject, message, fields = {}, attachment
           </table>
 
           ${sectionsHtml}
+          ${buildSignatureSectionsHtml(formData)}
           ${buildAttachmentSummaryHtml(attachments)}
 
           <p style="margin: 22px 0 0; color: #777777; font-size: 12px;">
@@ -923,7 +1002,14 @@ exports.sendReport = onRequest(
         replyTo: smtpReplyTo,
         subject,
         text: message,
-        html: buildReportHtml({ reportType, subject, message, fields, attachments }),
+        html: buildReportHtml({
+          reportType,
+          subject,
+          message,
+          fields,
+          formData,
+          attachments,
+        }),
         attachments,
       });
       const reportRef = await getFirestore().collection("reports").add(

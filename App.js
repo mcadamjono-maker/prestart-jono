@@ -851,6 +851,19 @@ const buildSvgPolylineMarkup = ({
     })
     .join("\n");
 
+const buildSignatureFieldHtml = (strokes = []) => `
+  <div class="signature-field">
+    <span>Drainlayer Signature</span>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+      ${buildSvgPolylineMarkup({
+        strokes,
+        width: 100,
+        height: 100,
+        strokeWidth: 2.7,
+      })}
+    </svg>
+  </div>`;
+
 const buildAsBuiltSvg = ({
   address,
   owner,
@@ -932,8 +945,8 @@ const buildAsBuiltSvg = ({
         )}</text>`
       : ""
   }
-  <rect x="4" y="32" width="92" height="68" fill="#fbfbfb" stroke="#222222" stroke-width="0.7" />
-  <g transform="translate(4 32) scale(0.92 0.68)">
+  <rect x="16" y="32" width="68" height="68" fill="#fbfbfb" stroke="#222222" stroke-width="0.7" />
+  <g transform="translate(16 32) scale(0.68 0.68)">
     <g stroke="#d6d6d6" stroke-width="0.16">
       ${Array.from({ length: 11 })
         .map(
@@ -984,7 +997,7 @@ const buildAsBuiltPlanOnlySvg = ({ lines, symbols }) => {
     .map((symbol) => buildAsBuiltSymbolMarkup(symbol))
     .join("\n");
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
     <defs>
       <marker id="arrowhead" markerWidth="5" markerHeight="5" refX="4.4" refY="2.5" orient="auto">
         <path d="M0,0 L5,2.5 L0,5 Z" fill="#b92b2b" />
@@ -1018,6 +1031,7 @@ const buildAsBuiltPdfHtml = ({
   mapOffset,
   mapRotation,
   boardSize,
+  drainlayerSignatureStrokes,
 }) => {
   const planWidth = 780;
   const planHeight = 405;
@@ -1027,11 +1041,14 @@ const buildAsBuiltPdfHtml = ({
   const mapTranslateY = ((mapOffset?.y || 0) / boardHeight) * planHeight;
   const fieldMarkup = fieldRows
     .map(
-      ([label, value]) => `
-        <div class="field">
-          <span>${escapeXml(label)}</span>
-          <strong>${escapeXml(value || "Not supplied")}</strong>
-        </div>`
+      ([label, value]) =>
+        /signature/i.test(label)
+          ? buildSignatureFieldHtml(drainlayerSignatureStrokes)
+          : `
+            <div class="field">
+              <span>${escapeXml(label)}</span>
+              <strong>${escapeXml(value || "Not supplied")}</strong>
+            </div>`
     )
     .join("");
 
@@ -1095,13 +1112,29 @@ const buildAsBuiltPdfHtml = ({
         padding: 4px 6px;
       }
 
-      .field span {
+      .signature-field {
+        min-height: 48px;
+        border: 1px solid #d2d2d2;
+        padding: 4px 6px;
+        grid-column: span 2;
+      }
+
+      .field span,
+      .signature-field span {
         display: block;
         color: #555555;
         font-size: 7.5px;
         font-weight: 700;
         letter-spacing: 0.2px;
         text-transform: uppercase;
+      }
+
+      .signature-field svg {
+        display: block;
+        width: 100%;
+        height: 31px;
+        margin-top: 2px;
+        background: #ffffff;
       }
 
       .field strong {
@@ -3745,7 +3778,7 @@ export default function App() {
         ["Inspector", asBuiltInspector.trim()],
         ["Drainlayer", asBuiltDrainlayer.trim()],
         ["Drainage License#", asBuiltDrainageLicenseNumber.trim()],
-        ["Drainlayer Signature", "Signature captured"],
+        ["Drainlayer Signature", "Drawn signature attached"],
         ["Notes", asBuiltNotes.trim() || "None"],
       ];
       const planSvg = buildAsBuiltPlanOnlySvg({
@@ -3786,6 +3819,7 @@ export default function App() {
               mapOffset: asBuiltMapOffset,
               mapRotation: asBuiltMapRotation,
               boardSize: asBuiltBoardSize,
+              drainlayerSignatureStrokes: asBuiltDrainlayerSignatureStrokes,
             }),
           });
       const subject = `As-Built plan - ${asBuiltAddress.trim()}`;
@@ -3818,8 +3852,13 @@ export default function App() {
           drainlayer: asBuiltDrainlayer.trim(),
           drainage_license_number:
             asBuiltDrainageLicenseNumber.trim() || "Not supplied",
-          drainlayer_signature: "Signature captured",
+          drainlayer_signature: "Drawn signature attached",
           notes: asBuiltNotes.trim() || "None",
+        },
+        formData: {
+          address: asBuiltAddress.trim(),
+          drainlayer: asBuiltDrainlayer.trim(),
+          drainlayerSignatureStrokes: asBuiltDrainlayerSignatureStrokes,
         },
         extraAttachments: [planAttachment.attachment],
       });
@@ -4624,6 +4663,7 @@ export default function App() {
             name: signOn.name,
             signedAt: signOn.signedAt,
             signatureCaptured: true,
+            signatureStrokes: signOn.signatureStrokes,
           })),
         },
       });
@@ -4710,11 +4750,13 @@ export default function App() {
   );
 
   const renderAsBuiltBoard = (fullScreen = false) => {
-    const boardWidth = fullScreen
-      ? Math.max(320, windowDimensions.width - 16)
-      : asBuiltBoardPixelSize;
+    const fullScreenBoardSize = Math.max(
+      300,
+      Math.min(windowDimensions.width - 16, windowDimensions.height - 142)
+    );
+    const boardWidth = fullScreen ? fullScreenBoardSize : asBuiltBoardPixelSize;
     const boardHeight = fullScreen
-      ? Math.max(420, windowDimensions.height - 150)
+      ? fullScreenBoardSize
       : asBuiltBoardPixelSize;
 
     return (

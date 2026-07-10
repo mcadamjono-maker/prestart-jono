@@ -176,6 +176,70 @@ const formatReportValue = (value) => {
   return String(value ?? "").trim() || "Not supplied";
 };
 
+const signaturePolylineMarkup = (strokes = []) =>
+  (Array.isArray(strokes) ? strokes : [])
+    .filter((stroke) => Array.isArray(stroke) && stroke.length > 1)
+    .map((stroke) => {
+      const points = stroke
+        .map((point) => {
+          const x = Math.max(0, Math.min(100, Number(point?.x) || 0));
+          const y = Math.max(0, Math.min(100, Number(point?.y) || 0));
+
+          return `${x.toFixed(2)},${y.toFixed(2)}`;
+        })
+        .join(" ");
+
+      return `<polyline points="${points}" fill="none" stroke="#111" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"></polyline>`;
+    })
+    .join("");
+
+const signatureSvgHtml = (strokes = []) => {
+  const markup = signaturePolylineMarkup(strokes);
+
+  if (!markup) return "";
+
+  return `<svg class="report-signature" viewBox="0 0 100 100" preserveAspectRatio="none">${markup}</svg>`;
+};
+
+const signatureSectionsHtml = (report) => {
+  const formData = report.formData || {};
+  const sections = [];
+  const drainlayerSignature = signatureSvgHtml(
+    formData.drainlayerSignatureStrokes
+  );
+
+  if (drainlayerSignature) {
+    sections.push(`
+      <h3>Drainlayer Signature</h3>
+      <div class="signature-list">
+        <article class="signature-card">${drainlayerSignature}</article>
+      </div>`);
+  }
+
+  const signOns = Array.isArray(formData.signOns) ? formData.signOns : [];
+  const signOnCards = signOns
+    .map((signOn) => {
+      const signature = signatureSvgHtml(signOn.signatureStrokes);
+
+      if (!signature) return "";
+
+      return `
+        <article class="signature-card">
+          <strong>${escapeHtml(signOn.name || "Worker")}</strong>
+          <span>${escapeHtml(signOn.signedAt || "")}</span>
+          ${signature}
+        </article>`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  if (signOnCards) {
+    sections.push(`<h3>Worker Signatures</h3><div class="signature-list">${signOnCards}</div>`);
+  }
+
+  return sections.join("");
+};
+
 const renderMetrics = () => {
   setText("#reportCount", state.reports.length);
   setText("#chargeUpCount", state.chargeUpReports.length);
@@ -537,6 +601,11 @@ const printableHtml = (report) => `
       th, td { border-bottom: 1px solid #e3e3e3; padding: 9px 10px; text-align: left; vertical-align: top; white-space: pre-line; }
       th { width: 32%; color: #596067; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
       td { font-size: 13px; }
+      .signature-list { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 18px; }
+      .signature-card { width: 240px; max-width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: #fff; }
+      .signature-card strong { display: block; font-size: 13px; }
+      .signature-card span { display: block; margin: 2px 0 7px; color: #666; font-size: 11px; }
+      .report-signature { display: block; width: 220px; max-width: 100%; height: 82px; background: #fff; border: 1px solid #ddd; border-radius: 6px; }
       pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #ddd; background: #f8f8f8; padding: 14px; font-size: 12px; }
       footer { margin-top: 20px; color: #777; font-size: 11px; }
       @media print {
@@ -561,6 +630,7 @@ const printableHtml = (report) => `
         </section>
         <h2>Report Details</h2>
         <table>${detailRows(report) || "<tr><td>No extra fields supplied.</td></tr>"}</table>
+        ${signatureSectionsHtml(report)}
         ${
           attachmentRows(report)
             ? `<h2>Attachments</h2><table>${attachmentRows(report)}</table>`
@@ -596,6 +666,7 @@ const openReport = (reportId) => {
       ${reportSummaryHtml(report)}
       <h3>Report Details</h3>
       <table class="detail-table">${detailRows(report) || "<tr><td>No extra fields supplied.</td></tr>"}</table>
+      ${signatureSectionsHtml(report)}
       ${
         attachmentRows(report)
           ? `<h3>Attachments</h3><table class="detail-table">${attachmentRows(report)}</table>`
