@@ -13,6 +13,7 @@ const state = {
   selectedReport: null,
   selectedJobNumber: "",
   selectedJobInfo: null,
+  showCompletedJobs: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -71,6 +72,29 @@ const formatDate = (value) => {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+};
+
+const formatDisplayDate = (isoDate) => {
+  const match = String(isoDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return String(isoDate || "");
+
+  return `${match[3]}/${match[2]}/${match[1]}`;
+};
+
+const parseDisplayDate = (value) => {
+  const cleanedValue = String(value || "").trim();
+  const displayMatch = cleanedValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+  if (displayMatch) {
+    const day = displayMatch[1].padStart(2, "0");
+    const month = displayMatch[2].padStart(2, "0");
+
+    return `${displayMatch[3]}-${month}-${day}`;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cleanedValue)) return cleanedValue;
+
+  return "";
 };
 
 const getAccessCode = () => localStorage.getItem(ACCESS_CODE_KEY) || "";
@@ -156,7 +180,7 @@ const renderMetrics = () => {
   setText("#reportCount", state.reports.length);
   setText("#chargeUpCount", state.chargeUpReports.length);
   setText("#hazardCount", state.hazardReports.length);
-  setText("#jobCount", state.jobs.length);
+  setText("#jobCount", state.jobs.filter((job) => !job.completed).length);
 };
 
 const renderReports = () => {
@@ -199,7 +223,10 @@ const getWeekDates = (weekStart) => {
 };
 
 const renderCalendar = () => {
-  const weekStart = $("#calendarWeek").value;
+  const weekStart = parseDisplayDate($("#calendarWeek").value);
+
+  if (!weekStart) return;
+
   const days = getWeekDates(weekStart);
   const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -211,7 +238,7 @@ const renderCalendar = () => {
 
         return `
           <section class="day">
-            <h3>${dayLabels[index]}<br />${date}</h3>
+            <h3>${dayLabels[index]}<br />${formatDisplayDate(date)}</h3>
             ${
               entries
                 .map(
@@ -231,21 +258,47 @@ const renderCalendar = () => {
 };
 
 const renderJobs = () => {
+  const activeJobs = state.jobs.filter((job) => !job.completed);
+  const completedJobs = state.jobs.filter((job) => job.completed);
+  const visibleJobs = state.showCompletedJobs
+    ? [...activeJobs, ...completedJobs]
+    : activeJobs;
+
   setHtml(
     "#jobsList",
-    state.jobs
+    `${
+      visibleJobs
       .map(
         (job) => `
-          <button
-            class="job-row ${state.selectedJobNumber === job.number ? "selected" : ""}"
-            type="button"
-            data-select-job="${escapeHtml(job.number)}"
-          >
-            <strong>${escapeHtml(job.number)}</strong>
-            <span>${escapeHtml(job.name)}</span>
-          </button>`
+          <article class="job-row-card ${job.completed ? "completed" : ""}">
+            <button
+              class="job-row ${state.selectedJobNumber === job.number ? "selected" : ""}"
+              type="button"
+              data-select-job="${escapeHtml(job.number)}"
+            >
+              <strong>${escapeHtml(job.number)}</strong>
+              <span>${escapeHtml(job.name)}</span>
+              ${job.completed ? '<em>Completed</em>' : ""}
+            </button>
+            <button
+              class="job-complete-button"
+              type="button"
+              data-complete-job="${escapeHtml(job.number)}"
+              data-completed="${job.completed ? "false" : "true"}"
+            >
+              ${job.completed ? "Restore" : "Mark Completed"}
+            </button>
+          </article>`
       )
       .join("") || emptyHtml()
+    }
+    ${
+      completedJobs.length
+        ? `<button class="show-completed-jobs" type="button" id="toggleCompletedJobs">
+            ${state.showCompletedJobs ? "Hide completed jobs" : "Show completed jobs"}
+          </button>`
+        : ""
+    }`
   );
 };
 
@@ -568,6 +621,15 @@ const loadSummary = async () => {
   state.hazardReports = payload.hazardReports || [];
   state.jobs = payload.jobs || [];
 
+  if (
+    state.selectedJobNumber &&
+    !state.showCompletedJobs &&
+    state.jobs.find((job) => job.number === state.selectedJobNumber)?.completed
+  ) {
+    state.selectedJobNumber = "";
+    state.selectedJobInfo = null;
+  }
+
   renderMetrics();
   renderReports();
   renderJobs();
@@ -575,7 +637,13 @@ const loadSummary = async () => {
 };
 
 const loadCalendar = async () => {
-  const weekStart = $("#calendarWeek").value;
+  const weekStart = parseDisplayDate($("#calendarWeek").value);
+
+  if (!weekStart) {
+    alert("Enter the week starting date as dd/mm/yyyy.");
+    return;
+  }
+
   const payload = await dashboardFetch(`?resource=calendar&weekStart=${weekStart}`);
 
   state.calendarEntries = payload.entries || [];
@@ -606,12 +674,54 @@ const addJob = async (event) => {
   renderJobs();
 };
 
+const setJobCompleted = async (jobNumber, completed) => {
+  const payload = await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "setJobCompleted",
+      number: jobNumber,
+      completed,
+    }),
+  });
+  const updatedJob = payload.job;
+
+  if (!updatedJob) return;
+
+  state.jobs = [
+    ...state.jobs.filter((job) => job.number !== updatedJob.number),
+    updatedJob,
+  ].sort((a, b) => a.number.localeCompare(b.number));
+
+  if (completed && state.selectedJobNumber === updatedJob.number) {
+    state.selectedJobNumber = "";
+    state.selectedJobInfo = null;
+  }
+
+  renderMetrics();
+  renderJobs();
+  renderSelectedJobInfo();
+};
+
+const toggleCompletedJobs = () => {
+  state.showCompletedJobs = !state.showCompletedJobs;
+  renderJobs();
+};
+
+const handleCalendarWeekInput = () => {
+  const parsedDate = parseDisplayDate($("#calendarWeek").value);
+
+  if (parsedDate) {
+    setValue("#calendarWeek", formatDisplayDate(parsedDate));
+    loadCalendar().catch((error) => alert(error.message));
+  }
+};
+
 const initialiseWeek = () => {
   const today = new Date();
   const day = today.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   today.setDate(today.getDate() + diffToMonday);
-  setValue("#calendarWeek", today.toISOString().slice(0, 10));
+  setValue("#calendarWeek", formatDisplayDate(today.toISOString().slice(0, 10)));
 };
 
 const init = () => {
@@ -631,7 +741,7 @@ const init = () => {
   );
   $("#reportSearch").addEventListener("input", renderReports);
   $("#reportTypeFilter").addEventListener("change", renderReports);
-  $("#calendarWeek").addEventListener("change", loadCalendar);
+  $("#calendarWeek").addEventListener("change", handleCalendarWeekInput);
   $("#jobForm").addEventListener("submit", (event) =>
     addJob(event).catch((error) => alert(error.message))
   );
@@ -676,10 +786,17 @@ const init = () => {
     const openReportId = event.target.closest("[data-open-report]")?.dataset.openReport;
     const selectJobNumber = event.target.closest("[data-select-job]")?.dataset.selectJob;
     const deleteFileId = event.target.closest("[data-delete-file]")?.dataset.deleteFile;
+    const completeJobButton = event.target.closest("[data-complete-job]");
 
     if (openReportId) openReport(openReportId);
     if (selectJobNumber) selectJob(selectJobNumber).catch((error) => alert(error.message));
     if (deleteFileId) deleteJobFile(deleteFileId).catch((error) => alert(error.message));
+    if (event.target.closest("#toggleCompletedJobs")) toggleCompletedJobs();
+    if (completeJobButton) {
+      const jobNumber = completeJobButton.dataset.completeJob;
+      const completed = completeJobButton.dataset.completed === "true";
+      setJobCompleted(jobNumber, completed).catch((error) => alert(error.message));
+    }
   });
 
   $("#closeDrawer").addEventListener("click", closeReport);

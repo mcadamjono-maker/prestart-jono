@@ -126,6 +126,8 @@ const formatJob = (doc) => {
   return {
     number: data.number || doc.id,
     name: data.name || "",
+    completed: Boolean(data.completed),
+    completedAtIso: data.completedAtIso || "",
   };
 };
 
@@ -973,8 +975,12 @@ exports.jobs = onRequest(
       const jobsCollection = getFirestore().collection("jobs");
 
       if (request.method === "GET") {
+        const includeCompleted =
+          String(request.query?.includeCompleted || "").toLowerCase() === "true";
         const snapshot = await jobsCollection.orderBy("number").get();
-        const jobs = snapshot.docs.map(formatJob).filter((job) => job.name);
+        const jobs = snapshot.docs
+          .map(formatJob)
+          .filter((job) => job.name && (includeCompleted || !job.completed));
 
         response.status(200).json({ ok: true, jobs });
         return;
@@ -1001,6 +1007,8 @@ exports.jobs = onRequest(
           {
             number: jobNumber,
             name: jobName,
+            completed: false,
+            completedAtIso: "",
             updatedAt: now,
             createdAt: now,
           },
@@ -1012,6 +1020,8 @@ exports.jobs = onRequest(
           job: {
             number: jobNumber,
             name: jobName,
+            completed: false,
+            completedAtIso: "",
           },
         });
         return;
@@ -1480,6 +1490,8 @@ exports.dashboard = onRequest(
             {
               number: jobNumber,
               name: jobName,
+              completed: false,
+              completedAtIso: "",
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
             },
@@ -1488,7 +1500,41 @@ exports.dashboard = onRequest(
 
           response.status(200).json({
             ok: true,
-            job: { number: jobNumber, name: jobName },
+            job: {
+              number: jobNumber,
+              name: jobName,
+              completed: false,
+              completedAtIso: "",
+            },
+          });
+          return;
+        }
+
+        if (action === "setJobCompleted") {
+          const jobNumber = normaliseJobNumber(request.body?.number);
+          const completed = Boolean(request.body?.completed);
+          const nowDate = new Date();
+
+          if (!jobNumber) {
+            response.status(400).json({ error: "Job number is required." });
+            return;
+          }
+
+          await db.collection("jobs").doc(jobNumber).set(
+            {
+              number: jobNumber,
+              completed,
+              completedAtIso: completed ? nowDate.toISOString() : "",
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          const jobDoc = await db.collection("jobs").doc(jobNumber).get();
+
+          response.status(200).json({
+            ok: true,
+            job: formatJob(jobDoc),
           });
           return;
         }

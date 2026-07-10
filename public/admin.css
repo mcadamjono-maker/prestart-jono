@@ -698,11 +698,20 @@ h2 {
   display: grid;
   width: 100%;
   gap: 3px;
-  margin-bottom: 8px;
   padding: 12px;
   text-align: left;
   border: 1px solid var(--line);
   border-radius: 16px;
+}
+
+.job-row-card {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.job-row-card.completed {
+  opacity: 0.72;
 }
 
 .job-row strong {
@@ -713,9 +722,35 @@ h2 {
   color: var(--ink);
 }
 
+.job-row em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .job-row.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(215, 255, 47, 0.12);
+}
+
+.job-complete-button,
+.show-completed-jobs {
+  min-height: 34px;
+  border-radius: 14px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.show-completed-jobs {
+  width: 100%;
+  margin-top: 8px;
+  color: var(--accent);
 }
 
 .drop-zone {

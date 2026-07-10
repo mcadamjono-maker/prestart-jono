@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111111" />
     <title>WDL Office Dashboard</title>
     <link rel="icon" href="/favicon.ico" />
-    <link rel="stylesheet" href="/admin.css?v=20260710-2" />
+    <link rel="stylesheet" href="/admin.css?v=20260710-3" />
   </head>
   <body>
     <header class="topbar">
@@ -81,7 +81,12 @@
           </div>
           <label>
             Week starting
-            <input id="calendarWeek" type="date" />
+            <input
+              id="calendarWeek"
+              type="text"
+              inputmode="numeric"
+              placeholder="dd/mm/yyyy"
+            />
           </label>
         </div>
         <div id="calendarGrid" class="calendar"></div>
@@ -177,6 +182,6 @@
       <div class="empty">Nothing to show yet.</div>
     </template>
 
-    <script src="/admin.js?v=20260710-2" defer></script>
+    <script src="/admin.js?v=20260710-3" defer></script>
   </body>
 </html>

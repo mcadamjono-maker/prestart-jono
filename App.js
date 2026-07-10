@@ -418,9 +418,10 @@ const normalizeJobOptions = (jobs) => {
       return {
         number: formatJobNumber(job.number),
         name: String(job.name || "").trim(),
+        completed: Boolean(job.completed),
       };
     })
-    .filter((job) => job.number.length === 4 && job.name)
+    .filter((job) => job.number.length === 4 && job.name && !job.completed)
     .sort((firstJob, secondJob) => firstJob.name.localeCompare(secondJob.name));
 };
 
@@ -457,6 +458,13 @@ const getSubmittedAt = () =>
   new Date().toLocaleString("en-NZ", {
     dateStyle: "medium",
     timeStyle: "short",
+  });
+
+const getTodayDisplayDate = () =>
+  new Date().toLocaleDateString("en-NZ", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
   });
 
 const getCurrentWeekStartIso = () => {
@@ -1779,7 +1787,7 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasLoadedSavedPrestart, setHasLoadedSavedPrestart] = useState(false);
   const [incidentReporter, setIncidentReporter] = useState("");
-  const [incidentDate, setIncidentDate] = useState("");
+  const [incidentDate, setIncidentDate] = useState(getTodayDisplayDate);
   const [incidentLocation, setIncidentLocation] = useState("");
   const [incidentMachine, setIncidentMachine] = useState("");
   const [incidentDescription, setIncidentDescription] = useState("");
@@ -1795,7 +1803,7 @@ export default function App() {
   const [selectedChargeJob, setSelectedChargeJob] = useState("");
   const [isChargeJobDropdownOpen, setIsChargeJobDropdownOpen] =
     useState(false);
-  const [chargeDate, setChargeDate] = useState("");
+  const [chargeDate, setChargeDate] = useState(getTodayDisplayDate);
   const [chargeEnteredBy, setChargeEnteredBy] = useState("");
   const [chargeWorkers, setChargeWorkers] = useState("");
   const [chargeHours, setChargeHours] = useState("");
@@ -1812,7 +1820,7 @@ export default function App() {
   const [isVariationJobDropdownOpen, setIsVariationJobDropdownOpen] =
     useState(false);
   const [variationRequestedBy, setVariationRequestedBy] = useState("");
-  const [variationDate, setVariationDate] = useState("");
+  const [variationDate, setVariationDate] = useState(getTodayDisplayDate);
   const [variationClient, setVariationClient] = useState("");
   const [variationSiteAddress, setVariationSiteAddress] = useState("");
   const [variationNumber, setVariationNumber] = useState("V001");
@@ -1835,8 +1843,8 @@ export default function App() {
   const [hazardSiteAddress, setHazardSiteAddress] = useState("");
   const [hazardTaskDescription, setHazardTaskDescription] = useState("");
   const [hazardPreparedBy, setHazardPreparedBy] = useState("");
-  const [hazardStartDate, setHazardStartDate] = useState("");
-  const [hazardFinishDate, setHazardFinishDate] = useState("");
+  const [hazardStartDate, setHazardStartDate] = useState(getTodayDisplayDate);
+  const [hazardFinishDate, setHazardFinishDate] = useState(getTodayDisplayDate);
   const [hazardYardChecks, setHazardYardChecks] = useState({});
   const [hazardSiteChecks, setHazardSiteChecks] = useState({});
   const [hazardRisks, setHazardRisks] = useState("");
@@ -1865,7 +1873,8 @@ export default function App() {
   const [asBuiltDpsNumber, setAsBuiltDpsNumber] = useState("");
   const [asBuiltBuildingConsentNumber, setAsBuiltBuildingConsentNumber] =
     useState("");
-  const [asBuiltInspectionDate, setAsBuiltInspectionDate] = useState("");
+  const [asBuiltInspectionDate, setAsBuiltInspectionDate] =
+    useState(getTodayDisplayDate);
   const [asBuiltInspector, setAsBuiltInspector] = useState("");
   const [asBuiltDrainlayer, setAsBuiltDrainlayer] = useState("");
   const [asBuiltDrainageLicenseNumber, setAsBuiltDrainageLicenseNumber] =
@@ -2114,7 +2123,7 @@ export default function App() {
             const remoteJobs = normalizeJobOptions(payload.jobs || []);
 
             if (remoteJobs.length > 0) {
-              nextJobOptions = mergeJobOptions(nextJobOptions, remoteJobs);
+              nextJobOptions = remoteJobs;
             }
           }
         } catch (error) {
@@ -2298,7 +2307,7 @@ export default function App() {
           return;
         }
 
-        setJobOptions((currentJobs) => mergeJobOptions(currentJobs, remoteJobs));
+        setJobOptions(remoteJobs);
         Alert.alert(
           "Jobs Updated",
           `${remoteJobs.length} jobs loaded from Firebase.`
@@ -2471,7 +2480,7 @@ export default function App() {
 
   const resetIncidentForm = () => {
     setIncidentReporter("");
-    setIncidentDate("");
+    setIncidentDate(getTodayDisplayDate());
     setIncidentLocation("");
     setIncidentMachine("");
     setIncidentDescription("");
@@ -2489,7 +2498,7 @@ export default function App() {
   const resetChargeUpForm = () => {
     setSelectedChargeJob("");
     setIsChargeJobDropdownOpen(false);
-    setChargeDate("");
+    setChargeDate(getTodayDisplayDate());
     setChargeEnteredBy("");
     setChargeWorkers("");
     setChargeHours("");
@@ -2501,7 +2510,7 @@ export default function App() {
 
   const resetVariationForm = () => {
     setVariationRequestedBy("");
-    setVariationDate("");
+    setVariationDate(getTodayDisplayDate());
     setVariationClient("");
     setVariationSiteAddress("");
     setVariationNumber("V001");
@@ -2527,8 +2536,8 @@ export default function App() {
     setHazardSiteAddress("");
     setHazardTaskDescription("");
     setHazardPreparedBy("");
-    setHazardStartDate("");
-    setHazardFinishDate("");
+    setHazardStartDate(getTodayDisplayDate());
+    setHazardFinishDate(getTodayDisplayDate());
     setHazardYardChecks({});
     setHazardSiteChecks({});
     setHazardRisks("");
@@ -2551,7 +2560,7 @@ export default function App() {
     setAsBuiltLotNumber("");
     setAsBuiltDpsNumber("");
     setAsBuiltBuildingConsentNumber("");
-    setAsBuiltInspectionDate("");
+    setAsBuiltInspectionDate(getTodayDisplayDate());
     setAsBuiltInspector("");
     setAsBuiltDrainlayer("");
     setAsBuiltDrainageLicenseNumber("");
@@ -2848,8 +2857,8 @@ export default function App() {
       formData.taskDescription || fields.task_description || ""
     );
     setHazardPreparedBy(formData.preparedBy || fields.prepared_by || "");
-    setHazardStartDate(formData.startDate || "");
-    setHazardFinishDate(formData.finishDate || "");
+    setHazardStartDate(formData.startDate || getTodayDisplayDate());
+    setHazardFinishDate(formData.finishDate || getTodayDisplayDate());
     setHazardYardChecks(draft?.yardChecks || {});
     setHazardSiteChecks(draft?.siteChecks || {});
     setHazardRisks(draft?.risks || "");
