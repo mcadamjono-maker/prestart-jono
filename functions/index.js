@@ -279,7 +279,7 @@ const buildSignatureSvgHtml = (strokes = []) => {
 
   if (!markup) return "";
 
-  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="display:block; width:220px; max-width:100%; height:82px; background:#ffffff; border:1px solid #d8d8d8; border-radius:6px;">${markup}</svg>`;
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="display:block; width:260px; max-width:100%; height:70px; background:#ffffff; border:1px solid #d8d8d8; border-radius:6px;">${markup}</svg>`;
 };
 
 const buildSignatureSectionsHtml = (formData = {}) => {

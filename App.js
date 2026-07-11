@@ -1070,8 +1070,8 @@ const buildAsBuiltPdfHtml = ({
   const boardWidth = Math.max(boardSize?.width || 1, 1);
   const boardHeight = Math.max(boardSize?.height || 1, 1);
   const boardAspectRatio = Math.max(1, boardHeight / boardWidth);
-  const maxPlanWidth = 540;
-  const maxPlanHeight = 610;
+  const maxPlanWidth = 535;
+  const maxPlanHeight = 700;
   const planWidth = Math.min(maxPlanWidth, maxPlanHeight / boardAspectRatio);
   const planHeight = planWidth * boardAspectRatio;
   const mapTranslateX = ((mapOffset?.x || 0) / boardWidth) * planWidth;
@@ -1096,7 +1096,7 @@ const buildAsBuiltPdfHtml = ({
     <style>
       @page {
         size: A4 portrait;
-        margin: 18px;
+        margin: 10px;
       }
 
       * {
@@ -1121,38 +1121,38 @@ const buildAsBuiltPdfHtml = ({
         align-items: flex-end;
         justify-content: space-between;
         border-bottom: 2px solid #111111;
-        padding-bottom: 6px;
-        margin-bottom: 7px;
+        padding-bottom: 4px;
+        margin-bottom: 5px;
       }
 
       h1 {
         margin: 0;
-        font-size: 18px;
+        font-size: 14px;
         line-height: 1.1;
       }
 
       .submitted {
-        font-size: 9px;
+        font-size: 7.5px;
         color: #444444;
       }
 
       .fields {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 5px 9px;
-        margin-bottom: 8px;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 3px 5px;
+        margin-bottom: 5px;
       }
 
       .field {
-        min-height: 25px;
+        min-height: 18px;
         border: 1px solid #d2d2d2;
-        padding: 4px 6px;
+        padding: 2px 4px;
       }
 
       .signature-field {
-        min-height: 48px;
+        min-height: 31px;
         border: 1px solid #d2d2d2;
-        padding: 4px 6px;
+        padding: 2px 4px;
         grid-column: span 2;
       }
 
@@ -1160,7 +1160,7 @@ const buildAsBuiltPdfHtml = ({
       .signature-field span {
         display: block;
         color: #555555;
-        font-size: 7.5px;
+        font-size: 5.8px;
         font-weight: 700;
         letter-spacing: 0.2px;
         text-transform: uppercase;
@@ -1169,16 +1169,16 @@ const buildAsBuiltPdfHtml = ({
       .signature-field svg {
         display: block;
         width: 100%;
-        height: 31px;
-        margin-top: 2px;
+        height: 20px;
+        margin-top: 1px;
         background: #ffffff;
       }
 
       .field strong {
         display: block;
-        margin-top: 2px;
+        margin-top: 1px;
         color: #111111;
-        font-size: 10px;
+        font-size: 7.5px;
         line-height: 1.2;
         font-weight: 700;
       }
