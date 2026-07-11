@@ -224,6 +224,12 @@ const DEFAULT_JOB_LIST_URL =
   "https://docs.google.com/spreadsheets/d/1P_KMGAMxyer0hRHwEGWnREwzwbp9cccehEmzJH8fGzg/export?format=csv&gid=0";
 const JOB_LIST_URL = process.env.EXPO_PUBLIC_JOB_LIST_URL || DEFAULT_JOB_LIST_URL;
 const IS_WEB = Platform.OS === "web";
+const URI_READ_TIMEOUT_MS = 20000;
+const MAP_IMAGE_TIMEOUT_MS = 12000;
+const FILE_WRITE_TIMEOUT_MS = 15000;
+const PDF_EXPORT_TIMEOUT_MS = 30000;
+const REPORT_SEND_TIMEOUT_MS = 45000;
+const MAIL_COMPOSER_TIMEOUT_MS = 45000;
 
 const AS_BUILT_LINE_COLORS = [
   { label: "Red", value: "#ff2f2f" },
@@ -676,15 +682,66 @@ const readBlobAsBase64 = (blob) =>
     reader.readAsDataURL(blob);
   });
 
+const withTimeout = (promise, timeoutMs, message) => {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+};
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs, message) => {
+  if (typeof AbortController === "undefined") {
+    return withTimeout(fetch(url, options), timeoutMs, message);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(message);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const composeMailWithTimeout = (options) =>
+  withTimeout(
+    MailComposer.composeAsync(options),
+    MAIL_COMPOSER_TIMEOUT_MS,
+    "Opening the email app timed out. Please try again."
+  );
+
 const readWebUriAsBase64 = async (uri) => {
   if (String(uri || "").startsWith("data:")) {
     return String(uri).split(",")[1] || "";
   }
 
-  const response = await fetch(uri);
+  const response = await fetchWithTimeout(
+    uri,
+    {},
+    URI_READ_TIMEOUT_MS,
+    "Reading the attachment timed out. Please try again."
+  );
   const blob = await response.blob();
 
-  return readBlobAsBase64(blob);
+  return withTimeout(
+    readBlobAsBase64(blob),
+    URI_READ_TIMEOUT_MS,
+    "Reading the attachment timed out. Please try again."
+  );
 };
 
 const getAsBuiltColorLabel = (colorValue) =>
@@ -2696,9 +2753,13 @@ export default function App() {
         capturedPhoto.base64 ||
         (IS_WEB
           ? await readWebUriAsBase64(capturedPhoto.uri)
-          : await FileSystem.readAsStringAsync(capturedPhoto.uri, {
-              encoding: FileSystem.EncodingType.Base64,
-            }));
+          : await withTimeout(
+              FileSystem.readAsStringAsync(capturedPhoto.uri, {
+                encoding: FileSystem.EncodingType.Base64,
+              }),
+              URI_READ_TIMEOUT_MS,
+              "Reading a photo timed out. Please try again."
+            ));
       const estimatedBytes = Math.ceil((base64Content.length * 3) / 4);
 
       totalBytes += estimatedBytes;
@@ -2749,13 +2810,21 @@ export default function App() {
 
     const fileUri = `${baseDirectory}${safeFilename}`;
 
-    await FileSystem.writeAsStringAsync(fileUri, content, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+    await withTimeout(
+      FileSystem.writeAsStringAsync(fileUri, content, {
+        encoding: FileSystem.EncodingType.UTF8,
+      }),
+      FILE_WRITE_TIMEOUT_MS,
+      "Creating the attachment timed out. Please try again."
+    );
 
-    const base64Content = await FileSystem.readAsStringAsync(fileUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    const base64Content = await withTimeout(
+      FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      }),
+      URI_READ_TIMEOUT_MS,
+      "Reading the attachment timed out. Please try again."
+    );
 
     return {
       attachment: {
@@ -2779,24 +2848,36 @@ export default function App() {
       throw new Error("Unable to create the plan attachment on this device.");
     }
 
-    const printedFile = await Print.printToFileAsync({
-      html,
-      width: 842,
-      height: 595,
-      base64: true,
-    });
+    const printedFile = await withTimeout(
+      Print.printToFileAsync({
+        html,
+        width: 842,
+        height: 595,
+        base64: true,
+      }),
+      PDF_EXPORT_TIMEOUT_MS,
+      "Creating the As-Built PDF timed out. Please try again."
+    );
     const fileUri = `${baseDirectory}${safeFilename}`;
 
-    await FileSystem.copyAsync({
-      from: printedFile.uri,
-      to: fileUri,
-    });
+    await withTimeout(
+      FileSystem.copyAsync({
+        from: printedFile.uri,
+        to: fileUri,
+      }),
+      FILE_WRITE_TIMEOUT_MS,
+      "Saving the As-Built PDF timed out. Please try again."
+    );
 
     const base64Content =
       printedFile.base64 ||
-      (await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      }));
+      (await withTimeout(
+        FileSystem.readAsStringAsync(fileUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        }),
+        URI_READ_TIMEOUT_MS,
+        "Reading the As-Built PDF timed out. Please try again."
+      ));
 
     return {
       attachment: {
@@ -2813,7 +2894,11 @@ export default function App() {
 
     if (IS_WEB) {
       try {
-        return await readWebUriAsBase64(imageUrl);
+        return await withTimeout(
+          readWebUriAsBase64(imageUrl),
+          MAP_IMAGE_TIMEOUT_MS,
+          "Loading the map image timed out."
+        );
       } catch {
         return "";
       }
@@ -2824,14 +2909,22 @@ export default function App() {
     if (!baseDirectory) return "";
 
     try {
-      const downloadedMap = await FileSystem.downloadAsync(
-        imageUrl,
-        `${baseDirectory}as-built-map-${Date.now()}.png`
+      const downloadedMap = await withTimeout(
+        FileSystem.downloadAsync(
+          imageUrl,
+          `${baseDirectory}as-built-map-${Date.now()}.png`
+        ),
+        MAP_IMAGE_TIMEOUT_MS,
+        "Loading the map image timed out."
       );
 
-      return await FileSystem.readAsStringAsync(downloadedMap.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      return await withTimeout(
+        FileSystem.readAsStringAsync(downloadedMap.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        }),
+        MAP_IMAGE_TIMEOUT_MS,
+        "Loading the map image timed out."
+      );
     } catch {
       return "";
     }
@@ -2857,21 +2950,26 @@ export default function App() {
       photoList,
       photoFilenamePrefix
     );
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          recipientEmail: activeRecipientEmail,
+          reportType,
+          subject,
+          message,
+          fields,
+          formData,
+          attachments: [...attachments, ...extraAttachments],
+        }),
       },
-      body: JSON.stringify({
-        recipientEmail: activeRecipientEmail,
-        reportType,
-        subject,
-        message,
-        fields,
-        formData,
-        attachments: [...attachments, ...extraAttachments],
-      }),
-    });
+      REPORT_SEND_TIMEOUT_MS,
+      "Sending the report timed out. Please check reception and try again."
+    );
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
@@ -3932,7 +4030,7 @@ export default function App() {
         return;
       }
 
-      const mailResult = await MailComposer.composeAsync({
+      const mailResult = await composeMailWithTimeout({
         recipients: [activeRecipientEmail],
         subject,
         body: message,
@@ -4039,7 +4137,7 @@ export default function App() {
           return;
         }
 
-        const mailResult = await MailComposer.composeAsync({
+        const mailResult = await composeMailWithTimeout({
           recipients: [activeRecipientEmail],
           subject,
           body: message,
@@ -4165,7 +4263,7 @@ export default function App() {
           return;
         }
 
-        const mailResult = await MailComposer.composeAsync({
+        const mailResult = await composeMailWithTimeout({
           recipients: [activeRecipientEmail],
           subject,
           body: message,
@@ -4195,7 +4293,7 @@ export default function App() {
           return;
         }
 
-        const mailResult = await MailComposer.composeAsync({
+        const mailResult = await composeMailWithTimeout({
           recipients: [activeRecipientEmail],
           subject,
           body: message,
@@ -4341,7 +4439,7 @@ export default function App() {
           return;
         }
 
-        const mailResult = await MailComposer.composeAsync({
+        const mailResult = await composeMailWithTimeout({
           recipients: [activeRecipientEmail],
           subject,
           body: message,
@@ -4454,7 +4552,7 @@ export default function App() {
           return;
         }
 
-        const mailResult = await MailComposer.composeAsync({
+        const mailResult = await composeMailWithTimeout({
           recipients: [activeRecipientEmail],
           subject,
           body: message,
@@ -4584,7 +4682,7 @@ export default function App() {
         return;
       }
 
-      const mailResult = await MailComposer.composeAsync({
+      const mailResult = await composeMailWithTimeout({
         recipients: [activeRecipientEmail],
         subject,
         body: message,
@@ -4738,7 +4836,7 @@ export default function App() {
         return;
       }
 
-      const mailResult = await MailComposer.composeAsync({
+      const mailResult = await composeMailWithTimeout({
         recipients: [activeRecipientEmail],
         subject,
         body: message,
