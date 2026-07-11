@@ -6092,30 +6092,6 @@ export default function App() {
                         Last saved: {hazardLastSavedAt}
                       </Text>
                     )}
-                    <Pressable
-                      style={[
-                        styles.secondaryButton,
-                        (isSubmitting ||
-                          isHazardDraftLoading ||
-                          isHazardDraftSaving) &&
-                          styles.disabledControl,
-                      ]}
-                      onPress={() => saveHazardDraft({ quiet: false })}
-                      disabled={
-                        isSubmitting ||
-                        isHazardDraftLoading ||
-                        isHazardDraftSaving
-                      }
-                      accessibilityRole="button"
-                    >
-                      {isHazardDraftSaving ? (
-                        <ActivityIndicator color="#D7FF2F" />
-                      ) : (
-                        <Text style={styles.secondaryButtonText}>
-                          SAVE HAZARD ID FOR WEEK
-                        </Text>
-                      )}
-                    </Pressable>
                   </View>
                 )}
 
@@ -6432,6 +6408,34 @@ export default function App() {
                   </View>
                 )}
               </View>
+
+              {!!selectedHazardJob && (
+                <Pressable
+                  style={[
+                    styles.secondaryButton,
+                    styles.bottomSecondaryButton,
+                    (isSubmitting ||
+                      isHazardDraftLoading ||
+                      isHazardDraftSaving) &&
+                      styles.disabledControl,
+                  ]}
+                  onPress={() => saveHazardDraft({ quiet: false })}
+                  disabled={
+                    isSubmitting ||
+                    isHazardDraftLoading ||
+                    isHazardDraftSaving
+                  }
+                  accessibilityRole="button"
+                >
+                  {isHazardDraftSaving ? (
+                    <ActivityIndicator color="#D7FF2F" />
+                  ) : (
+                    <Text style={styles.secondaryButtonText}>
+                      SAVE HAZARD ID FOR WEEK
+                    </Text>
+                  )}
+                </Pressable>
+              )}
 
               <Pressable
                 style={[
@@ -7361,6 +7365,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
     backgroundColor: "#111",
+  },
+
+  bottomSecondaryButton: {
+    marginTop: 12,
+    marginHorizontal: 18,
   },
 
   secondaryButtonText: {
