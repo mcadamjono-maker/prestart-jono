@@ -258,8 +258,24 @@ const buildSignaturePolylineMarkup = (strokes = []) =>
     })
     .join("");
 
+const parseSignatureStrokes = (strokes = []) => {
+  if (Array.isArray(strokes)) return strokes;
+
+  if (typeof strokes === "string") {
+    try {
+      const parsed = JSON.parse(strokes || "[]");
+
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
 const buildSignatureSvgHtml = (strokes = []) => {
-  const markup = buildSignaturePolylineMarkup(strokes);
+  const markup = buildSignaturePolylineMarkup(parseSignatureStrokes(strokes));
 
   if (!markup) return "";
 
@@ -269,7 +285,8 @@ const buildSignatureSvgHtml = (strokes = []) => {
 const buildSignatureSectionsHtml = (formData = {}) => {
   const sections = [];
   const drainlayerSignature = buildSignatureSvgHtml(
-    formData.drainlayerSignatureStrokes
+    formData.drainlayerSignatureStrokes ||
+      formData.drainlayerSignatureStrokesJson
   );
 
   if (drainlayerSignature) {
@@ -285,7 +302,9 @@ const buildSignatureSectionsHtml = (formData = {}) => {
   const signOns = Array.isArray(formData.signOns) ? formData.signOns : [];
   const signOnCards = signOns
     .map((signOn) => {
-      const signature = buildSignatureSvgHtml(signOn?.signatureStrokes);
+      const signature = buildSignatureSvgHtml(
+        signOn?.signatureStrokes || signOn?.signatureStrokesJson
+      );
 
       if (!signature) return "";
 
@@ -526,6 +545,36 @@ const normaliseAttachments = (attachments = []) => {
 
 const toPlainObject = (value) =>
   value && typeof value === "object" && !Array.isArray(value) ? value : {};
+
+const prepareFormDataForStorage = (formData = {}) => {
+  const safeFormData = { ...toPlainObject(formData) };
+
+  if (Array.isArray(safeFormData.drainlayerSignatureStrokes)) {
+    safeFormData.drainlayerSignatureStrokesJson = JSON.stringify(
+      safeFormData.drainlayerSignatureStrokes
+    ).slice(0, 60000);
+    delete safeFormData.drainlayerSignatureStrokes;
+  }
+
+  if (Array.isArray(safeFormData.signOns)) {
+    safeFormData.signOns = safeFormData.signOns.slice(0, 250).map((signOn) => {
+      const safeSignOn = {
+        ...toPlainObject(signOn),
+      };
+
+      if (Array.isArray(safeSignOn.signatureStrokes)) {
+        safeSignOn.signatureStrokesJson = JSON.stringify(
+          safeSignOn.signatureStrokes
+        ).slice(0, 60000);
+        delete safeSignOn.signatureStrokes;
+      }
+
+      return safeSignOn;
+    });
+  }
+
+  return safeFormData;
+};
 
 const toSearchText = (...values) =>
   values
@@ -823,7 +872,7 @@ const buildStoredReport = ({
 }) => {
   const now = new Date();
   const safeFields = toPlainObject(fields);
-  const safeFormData = toPlainObject(formData);
+  const safeFormData = prepareFormDataForStorage(formData);
   const heading = formatReportHeading(reportType);
   const jobNumber = getStringField(safeFields, [
     "job_number",

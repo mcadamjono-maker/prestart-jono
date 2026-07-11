@@ -193,8 +193,24 @@ const signaturePolylineMarkup = (strokes = []) =>
     })
     .join("");
 
+const parseSignatureStrokes = (strokes = []) => {
+  if (Array.isArray(strokes)) return strokes;
+
+  if (typeof strokes === "string") {
+    try {
+      const parsed = JSON.parse(strokes || "[]");
+
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
 const signatureSvgHtml = (strokes = []) => {
-  const markup = signaturePolylineMarkup(strokes);
+  const markup = signaturePolylineMarkup(parseSignatureStrokes(strokes));
 
   if (!markup) return "";
 
@@ -205,7 +221,8 @@ const signatureSectionsHtml = (report) => {
   const formData = report.formData || {};
   const sections = [];
   const drainlayerSignature = signatureSvgHtml(
-    formData.drainlayerSignatureStrokes
+    formData.drainlayerSignatureStrokes ||
+      formData.drainlayerSignatureStrokesJson
   );
 
   if (drainlayerSignature) {
@@ -219,7 +236,9 @@ const signatureSectionsHtml = (report) => {
   const signOns = Array.isArray(formData.signOns) ? formData.signOns : [];
   const signOnCards = signOns
     .map((signOn) => {
-      const signature = signatureSvgHtml(signOn.signatureStrokes);
+      const signature = signatureSvgHtml(
+        signOn.signatureStrokes || signOn.signatureStrokesJson
+      );
 
       if (!signature) return "";
 

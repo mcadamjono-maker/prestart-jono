@@ -3319,13 +3319,22 @@ export default function App() {
     };
   };
 
-  const getAsBuiltTouchPoints = (event) =>
-    Array.from(event.nativeEvent.touches || [])
+  const getAsBuiltTouchPoints = (event) => {
+    const nativeEvent = event.nativeEvent || {};
+    const touches =
+      nativeEvent.touches?.length > 0
+        ? nativeEvent.touches
+        : nativeEvent.targetTouches?.length > 0
+        ? nativeEvent.targetTouches
+        : nativeEvent.changedTouches || [];
+
+    return Array.from(touches)
       .map((touch) => ({
         x: Number.isFinite(touch.locationX) ? touch.locationX : touch.pageX,
         y: Number.isFinite(touch.locationY) ? touch.locationY : touch.pageY,
       }))
       .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  };
 
   const getAsBuiltTwoFingerInfo = (event) => {
     const touchPoints = getAsBuiltTouchPoints(event);
@@ -3542,8 +3551,11 @@ export default function App() {
           currentAsBuiltLineRef.current = nextLine;
           setCurrentAsBuiltLine(nextLine);
         },
-        onPanResponderMove: (event) => {
-          if (getAsBuiltTouchPoints(event).length >= 2) {
+        onPanResponderMove: (event, gestureState) => {
+          if (
+            getAsBuiltTouchPoints(event).length >= 2 ||
+            gestureState.numberActiveTouches >= 2
+          ) {
             updateAsBuiltMapGesture(event);
             return;
           }
@@ -3629,6 +3641,7 @@ export default function App() {
           asBuiltMapGestureRef.current = null;
           cancelCurrentAsBuiltLine();
         },
+        onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
       }),
     [
