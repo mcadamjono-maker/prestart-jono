@@ -664,13 +664,15 @@ const normaliseSignOns = (formData = {}, fields = {}, submittedAt = new Date()) 
       .map((signOn) => {
         const name = String(signOn?.name || "").trim();
         const signedAt = String(signOn?.signedAt || "").trim();
-        const signedDate = parseSignedAtDate(signedAt, submittedAt);
+        const signedAtIso = String(signOn?.signedAtIso || "").trim();
+        const signedDate = parseSignedAtDate(signedAtIso || signedAt, submittedAt);
 
         if (!name) return null;
 
         return {
           name,
           signedAt: signedAt || submittedAt.toISOString(),
+          signedAtIso: signedAtIso || signedDate.toISOString(),
           date: signedDate.toISOString().slice(0, 10),
           weekStart: getWeekStartIso(signedDate),
           signatureCaptured: Boolean(signOn?.signatureCaptured),
@@ -711,7 +713,8 @@ const normaliseHazardDraftSignOns = (signOns = [], submittedAt = new Date()) => 
     .map((signOn) => {
       const name = String(signOn?.name || "").trim().slice(0, 120);
       const signedAt = String(signOn?.signedAt || "").trim();
-      const signedDate = parseSignedAtDate(signedAt, submittedAt);
+      const signedAtIso = String(signOn?.signedAtIso || "").trim();
+      const signedDate = parseSignedAtDate(signedAtIso || signedAt, submittedAt);
       const signatureStrokes = Array.isArray(signOn?.signatureStrokes)
         ? signOn.signatureStrokes.slice(0, 20).map((stroke) =>
             Array.isArray(stroke)
@@ -728,6 +731,7 @@ const normaliseHazardDraftSignOns = (signOns = [], submittedAt = new Date()) => 
       return {
         name,
         signedAt: signedAt || submittedAt.toISOString(),
+        signedAtIso: signedAtIso || signedDate.toISOString(),
         date: signedDate.toISOString().slice(0, 10),
         weekStart: getWeekStartIso(signedDate),
         signatureCaptured: signatureStrokes.length > 0,
@@ -751,6 +755,7 @@ const publicHazardSignOns = (signOns = []) =>
         return {
           name: signOn.name || "",
           signedAt: signOn.signedAt || "",
+          signedAtIso: signOn.signedAtIso || "",
           date: signOn.date || "",
           weekStart: signOn.weekStart || "",
           signatureCaptured: Boolean(signOn.signatureCaptured),

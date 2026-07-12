@@ -3,6 +3,8 @@ const DASHBOARD_ENDPOINT =
 const JOB_INFO_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const ACCESS_CODE_KEY = "wdl-dashboard-access-code";
+const CALENDAR_REFRESH_MS = 10000;
+let calendarRefreshTimer = null;
 
 const state = {
   reports: [],
@@ -722,11 +724,11 @@ const loadSummary = async () => {
   renderSelectedJobInfo();
 };
 
-const loadCalendar = async () => {
+const loadCalendar = async ({ silent = false } = {}) => {
   const weekStart = parseDisplayDate($("#calendarWeek").value);
 
   if (!weekStart) {
-    alert("Enter the week starting date as dd/mm/yyyy.");
+    if (!silent) alert("Enter the week starting date as dd/mm/yyyy.");
     return;
   }
 
@@ -734,6 +736,23 @@ const loadCalendar = async () => {
 
   state.calendarEntries = payload.entries || [];
   renderCalendar();
+};
+
+const refreshCalendarQuietly = () =>
+  loadCalendar({ silent: true }).catch((error) => {
+    console.warn("Calendar refresh failed", error);
+  });
+
+const startCalendarAutoRefresh = () => {
+  if (calendarRefreshTimer) {
+    window.clearInterval(calendarRefreshTimer);
+  }
+
+  calendarRefreshTimer = window.setInterval(() => {
+    if (!document.hidden) {
+      refreshCalendarQuietly();
+    }
+  }, CALENDAR_REFRESH_MS);
 };
 
 const addJob = async (event) => {
@@ -828,6 +847,12 @@ const init = () => {
   $("#reportSearch").addEventListener("input", renderReports);
   $("#reportTypeFilter").addEventListener("change", renderReports);
   $("#calendarWeek").addEventListener("change", handleCalendarWeekInput);
+  window.addEventListener("focus", refreshCalendarQuietly);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      refreshCalendarQuietly();
+    }
+  });
   $("#jobForm").addEventListener("submit", (event) =>
     addJob(event).catch((error) => alert(error.message))
   );
@@ -914,6 +939,7 @@ const init = () => {
     }
   });
 
+  startCalendarAutoRefresh();
   loadSummary().then(loadCalendar).catch((error) => alert(error.message));
 };
 

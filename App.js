@@ -3041,6 +3041,7 @@ export default function App() {
         ? draft.signOns.map((signOn) => ({
             name: signOn.name || "",
             signedAt: signOn.signedAt || "",
+            signedAtIso: signOn.signedAtIso || "",
             signatureStrokes: Array.isArray(signOn.signatureStrokes)
               ? signOn.signatureStrokes
               : [],
@@ -3058,10 +3059,10 @@ export default function App() {
     }, 0);
   };
 
-  const saveHazardDraft = async ({ quiet = false } = {}) => {
+  const saveHazardDraft = async ({ quiet = false, payloadOverride = null } = {}) => {
     if (!selectedHazardJob || !FIREBASE_HAZARD_ENDPOINT) return false;
 
-    const payload = buildHazardDraftPayload();
+    const payload = payloadOverride || buildHazardDraftPayload();
 
     if (!payload.jobName) return false;
 
@@ -3840,17 +3841,28 @@ export default function App() {
       return;
     }
 
-    setHazardSignOns((currentSignOns) => [
-      ...currentSignOns,
-      {
-        name: hazardSignOnName.trim(),
-        signedAt: getSubmittedAt(),
-        signatureStrokes: hazardSignatureStrokes,
-      },
-    ]);
+    const newSignOn = {
+      name: hazardSignOnName.trim(),
+      signedAt: getSubmittedAt(),
+      signedAtIso: new Date().toISOString(),
+      signatureStrokes: hazardSignatureStrokes,
+    };
+    const nextSignOns = [...hazardSignOns, newSignOn];
+
+    setHazardSignOns(nextSignOns);
     setHazardSignOnName("");
     setHasHazardSignOnConfirmed(false);
     setHazardSignatureStrokes([]);
+
+    saveHazardDraft({
+      quiet: true,
+      payloadOverride: {
+        ...buildHazardDraftPayload(),
+        signOns: nextSignOns,
+      },
+    }).catch((error) => {
+      console.warn("Unable to save Hazard ID sign-on immediately", error);
+    });
   };
 
   const undoAsBuiltMark = () => {
@@ -4812,6 +4824,7 @@ export default function App() {
           signOns: hazardSignOns.map((signOn) => ({
             name: signOn.name,
             signedAt: signOn.signedAt,
+            signedAtIso: signOn.signedAtIso,
             signatureCaptured: true,
             signatureStrokes: signOn.signatureStrokes,
           })),
