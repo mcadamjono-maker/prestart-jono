@@ -6409,33 +6409,33 @@ export default function App() {
                 )}
               </View>
 
-              {!!selectedHazardJob && (
-                <Pressable
-                  style={[
-                    styles.secondaryButton,
-                    styles.bottomSecondaryButton,
-                    (isSubmitting ||
-                      isHazardDraftLoading ||
-                      isHazardDraftSaving) &&
-                      styles.disabledControl,
-                  ]}
-                  onPress={() => saveHazardDraft({ quiet: false })}
-                  disabled={
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  styles.bottomSecondaryButton,
+                  (!selectedHazardJob ||
                     isSubmitting ||
                     isHazardDraftLoading ||
-                    isHazardDraftSaving
-                  }
-                  accessibilityRole="button"
-                >
-                  {isHazardDraftSaving ? (
-                    <ActivityIndicator color="#D7FF2F" />
-                  ) : (
-                    <Text style={styles.secondaryButtonText}>
-                      SAVE HAZARD ID FOR WEEK
-                    </Text>
-                  )}
-                </Pressable>
-              )}
+                    isHazardDraftSaving) &&
+                    styles.disabledControl,
+                ]}
+                onPress={() => saveHazardDraft({ quiet: false })}
+                disabled={
+                  !selectedHazardJob ||
+                  isSubmitting ||
+                  isHazardDraftLoading ||
+                  isHazardDraftSaving
+                }
+                accessibilityRole="button"
+              >
+                {isHazardDraftSaving ? (
+                  <ActivityIndicator color="#D7FF2F" />
+                ) : (
+                  <Text style={styles.secondaryButtonText}>
+                    SAVE HAZARD ID FOR WEEK
+                  </Text>
+                )}
+              </Pressable>
 
               <Pressable
                 style={[
