@@ -655,8 +655,6 @@ const printableHtml = (report) => `
             ? `<h2>Attachments</h2><table>${attachmentRows(report)}</table>`
             : ""
         }
-        <h2>Plain Filed Copy</h2>
-        <pre>${escapeHtml(report.message || "")}</pre>
         <footer>Filed from the WDL Field Forms app.</footer>
       </main>
     </div>
@@ -691,8 +689,6 @@ const openReport = (reportId) => {
           ? `<h3>Attachments</h3><table class="detail-table">${attachmentRows(report)}</table>`
           : ""
       }
-      <h3>Plain Filed Copy</h3>
-      <pre>${escapeHtml(report.message || "")}</pre>
     </article>`
   );
   setAttributeSafe("#reportDrawer", "aria-hidden", "false");

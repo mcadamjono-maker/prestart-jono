@@ -1050,7 +1050,7 @@ exports.sendReport = onRequest(
         to: recipientEmail,
         replyTo: smtpReplyTo,
         subject,
-        text: message,
+        text: `${formatReportHeading(reportType)}\n${subject}\n\nOpen this email in an HTML-capable mail app to view the filed report.`,
         html: buildReportHtml({
           reportType,
           subject,

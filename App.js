@@ -3308,7 +3308,6 @@ export default function App() {
       {
         subject,
         message,
-        filed_report: message,
         to_email: activeRecipientEmail,
         recipient_email: activeRecipientEmail,
         sender_email: activeRecipientEmail,
