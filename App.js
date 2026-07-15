@@ -230,6 +230,13 @@ const FILE_WRITE_TIMEOUT_MS = 15000;
 const PDF_EXPORT_TIMEOUT_MS = 30000;
 const REPORT_SEND_TIMEOUT_MS = 45000;
 const MAIL_COMPOSER_TIMEOUT_MS = 45000;
+const WEB_TOUCH_LOCK_STYLE = IS_WEB
+  ? {
+      touchAction: "none",
+      userSelect: "none",
+      WebkitUserSelect: "none",
+    }
+  : {};
 
 const AS_BUILT_LINE_COLORS = [
   { label: "Red", value: "#ff2f2f" },
@@ -2040,6 +2047,7 @@ export default function App() {
   });
   const [isAsBuiltFocused, setIsAsBuiltFocused] = useState(false);
   const [isDrawingAsBuilt, setIsDrawingAsBuilt] = useState(false);
+  const [isAdjustingAsBuiltMap, setIsAdjustingAsBuiltMap] = useState(false);
   const [hasLoadedJobs, setHasLoadedJobs] = useState(false);
   const asBuiltLineStartRef = useRef(null);
   const currentAsBuiltLineRef = useRef(null);
@@ -3366,6 +3374,15 @@ export default function App() {
   const getSignaturePointCount = (signatureStrokes) =>
     signatureStrokes.reduce((total, stroke) => total + stroke.length, 0);
 
+  const blockWebTouchEvent = (event) => {
+    if (!IS_WEB) return;
+
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.nativeEvent?.preventDefault?.();
+    event?.nativeEvent?.stopPropagation?.();
+  };
+
   const getHazardSignOnSummary = () => {
     if (hazardSignOns.length === 0) return "No workers signed on.";
 
@@ -3477,6 +3494,7 @@ export default function App() {
       initialOffset: asBuiltMapOffset,
       initialRotation: asBuiltMapRotation,
     };
+    setIsAdjustingAsBuiltMap(true);
     cancelCurrentAsBuiltLine();
 
     return true;
@@ -3554,6 +3572,7 @@ export default function App() {
         onMoveShouldSetPanResponder: () => !isSubmitting,
         onMoveShouldSetPanResponderCapture: () => !isSubmitting,
         onPanResponderGrant: (event) => {
+          blockWebTouchEvent(event);
           const point = getSignaturePoint(event);
 
           if (!point) return;
@@ -3566,6 +3585,7 @@ export default function App() {
           ]);
         },
         onPanResponderMove: (event) => {
+          blockWebTouchEvent(event);
           const point = getSignaturePoint(event);
 
           if (!point) return;
@@ -3599,6 +3619,7 @@ export default function App() {
         onPanResponderTerminate: () => {
           setIsDrawingSignature(false);
         },
+        onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
       }),
     [isSubmitting, signaturePadSize]
@@ -3612,6 +3633,7 @@ export default function App() {
         onMoveShouldSetPanResponder: () => !isSubmitting,
         onMoveShouldSetPanResponderCapture: () => !isSubmitting,
         onPanResponderGrant: (event) => {
+          blockWebTouchEvent(event);
           if (getAsBuiltTouchPoints(event).length >= 2) {
             startAsBuiltMapGesture(event);
             return;
@@ -3650,6 +3672,7 @@ export default function App() {
           setCurrentAsBuiltLine(nextLine);
         },
         onPanResponderMove: (event, gestureState) => {
+          blockWebTouchEvent(event);
           if (
             getAsBuiltTouchPoints(event).length >= 2 ||
             gestureState.numberActiveTouches >= 2
@@ -3733,10 +3756,12 @@ export default function App() {
           }
 
           asBuiltMapGestureRef.current = null;
+          setIsAdjustingAsBuiltMap(false);
           cancelCurrentAsBuiltLine();
         },
         onPanResponderTerminate: () => {
           asBuiltMapGestureRef.current = null;
+          setIsAdjustingAsBuiltMap(false);
           cancelCurrentAsBuiltLine();
         },
         onPanResponderTerminationRequest: () => false,
@@ -3764,6 +3789,7 @@ export default function App() {
         onMoveShouldSetPanResponder: () => !isSubmitting,
         onMoveShouldSetPanResponderCapture: () => !isSubmitting,
         onPanResponderGrant: (event) => {
+          blockWebTouchEvent(event);
           const point = getAsBuiltSignaturePoint(event);
 
           if (!point) return;
@@ -3776,6 +3802,7 @@ export default function App() {
           ]);
         },
         onPanResponderMove: (event) => {
+          blockWebTouchEvent(event);
           const point = getAsBuiltSignaturePoint(event);
 
           if (!point) return;
@@ -3809,6 +3836,7 @@ export default function App() {
         onPanResponderTerminate: () => {
           setIsDrawingAsBuiltSignature(false);
         },
+        onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
       }),
     [asBuiltSignaturePadSize, isSubmitting]
@@ -5034,6 +5062,8 @@ export default function App() {
 
         <View
           style={styles.asBuiltDrawingTouchLayer}
+          onTouchStart={blockWebTouchEvent}
+          onTouchMove={blockWebTouchEvent}
           {...asBuiltPanResponder.panHandlers}
         />
 
@@ -5297,7 +5327,8 @@ export default function App() {
               scrollEnabled={
                 !isDrawingSignature &&
                 !isDrawingAsBuilt &&
-                !isDrawingAsBuiltSignature
+                !isDrawingAsBuiltSignature &&
+                !isAdjustingAsBuiltMap
               }
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
@@ -6360,6 +6391,8 @@ export default function App() {
                     <Text style={styles.inputLabel}>Signature</Text>
                     <View
                       style={styles.signaturePad}
+                      onTouchStart={blockWebTouchEvent}
+                      onTouchMove={blockWebTouchEvent}
                       onLayout={(event) => {
                         const { width, height } = event.nativeEvent.layout;
 
@@ -6604,6 +6637,8 @@ export default function App() {
                 <Text style={styles.inputLabel}>Drainlayer Signature</Text>
                 <View
                   style={styles.signaturePad}
+                  onTouchStart={blockWebTouchEvent}
+                  onTouchMove={blockWebTouchEvent}
                   onLayout={(event) => {
                     const { width, height } = event.nativeEvent.layout;
 
@@ -7346,6 +7381,7 @@ const styles = StyleSheet.create({
   },
 
   signaturePad: {
+    ...WEB_TOUCH_LOCK_STYLE,
     height: 150,
     backgroundColor: "#f8f8f8",
     borderRadius: 14,
@@ -7357,6 +7393,7 @@ const styles = StyleSheet.create({
   },
 
   signatureCanvas: {
+    ...WEB_TOUCH_LOCK_STYLE,
     ...StyleSheet.absoluteFillObject,
   },
 
@@ -7689,6 +7726,7 @@ const styles = StyleSheet.create({
   },
 
   asBuiltDrawingTouchLayer: {
+    ...WEB_TOUCH_LOCK_STYLE,
     ...StyleSheet.absoluteFillObject,
     zIndex: 3,
   },
