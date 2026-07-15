@@ -233,7 +233,9 @@ const MAIL_COMPOSER_TIMEOUT_MS = 45000;
 const WEB_TOUCH_LOCK_STYLE = IS_WEB
   ? {
       touchAction: "none",
+      overscrollBehavior: "contain",
       userSelect: "none",
+      WebkitTouchCallout: "none",
       WebkitUserSelect: "none",
     }
   : {};
@@ -2056,6 +2058,52 @@ export default function App() {
   const hazardDraftSaveTimerRef = useRef(null);
   const isHydratingHazardDraftRef = useRef(false);
 
+  useEffect(() => {
+    if (!IS_WEB || typeof document === "undefined") return undefined;
+
+    let lastTouchEndAt = 0;
+    const lockedSelector = '[data-wdl-touch-lock="true"]';
+    const hasLockedTarget = (target) =>
+      Boolean(target?.closest?.(lockedSelector));
+    const preventIfCancelable = (event) => {
+      if (event.cancelable !== false) {
+        event.preventDefault();
+      }
+    };
+    const handleTouchMove = (event) => {
+      if ((event.touches?.length || 0) > 1 || hasLockedTarget(event.target)) {
+        preventIfCancelable(event);
+      }
+    };
+    const handleGesture = (event) => {
+      preventIfCancelable(event);
+    };
+    const handleTouchEnd = (event) => {
+      const now = Date.now();
+
+      if (now - lastTouchEndAt < 350) {
+        preventIfCancelable(event);
+      }
+
+      lastTouchEndAt = now;
+    };
+    const options = { capture: true, passive: false };
+
+    document.addEventListener("touchmove", handleTouchMove, options);
+    document.addEventListener("touchend", handleTouchEnd, options);
+    document.addEventListener("gesturestart", handleGesture, options);
+    document.addEventListener("gesturechange", handleGesture, options);
+    document.addEventListener("gestureend", handleGesture, options);
+
+    return () => {
+      document.removeEventListener("touchmove", handleTouchMove, options);
+      document.removeEventListener("touchend", handleTouchEnd, options);
+      document.removeEventListener("gesturestart", handleGesture, options);
+      document.removeEventListener("gesturechange", handleGesture, options);
+      document.removeEventListener("gestureend", handleGesture, options);
+    };
+  }, []);
+
   const checklist = CHECKLIST_TEMPLATES[selectedTemplate];
   const machineFieldLabel =
     MACHINE_FIELD_LABELS[selectedTemplate] || "Machine ID / Rego";
@@ -3378,9 +3426,7 @@ export default function App() {
     if (!IS_WEB) return;
 
     event?.preventDefault?.();
-    event?.stopPropagation?.();
     event?.nativeEvent?.preventDefault?.();
-    event?.nativeEvent?.stopPropagation?.();
   };
 
   const getHazardSignOnSummary = () => {
@@ -5062,8 +5108,7 @@ export default function App() {
 
         <View
           style={styles.asBuiltDrawingTouchLayer}
-          onTouchStart={blockWebTouchEvent}
-          onTouchMove={blockWebTouchEvent}
+          dataSet={{ wdlTouchLock: "true" }}
           {...asBuiltPanResponder.panHandlers}
         />
 
@@ -6391,8 +6436,7 @@ export default function App() {
                     <Text style={styles.inputLabel}>Signature</Text>
                     <View
                       style={styles.signaturePad}
-                      onTouchStart={blockWebTouchEvent}
-                      onTouchMove={blockWebTouchEvent}
+                      dataSet={{ wdlTouchLock: "true" }}
                       onLayout={(event) => {
                         const { width, height } = event.nativeEvent.layout;
 
@@ -6637,8 +6681,7 @@ export default function App() {
                 <Text style={styles.inputLabel}>Drainlayer Signature</Text>
                 <View
                   style={styles.signaturePad}
-                  onTouchStart={blockWebTouchEvent}
-                  onTouchMove={blockWebTouchEvent}
+                  dataSet={{ wdlTouchLock: "true" }}
                   onLayout={(event) => {
                     const { width, height } = event.nativeEvent.layout;
 
