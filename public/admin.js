@@ -138,8 +138,20 @@ const reportMeta = (report) =>
     .map(escapeHtml)
     .join(" | ");
 
+const INTERNAL_REPORT_FIELDS = new Set([
+  "template",
+  "report_type",
+  "recipient_email",
+  "to_email",
+  "sender_email",
+  "from_email",
+  "email_body",
+]);
+
 const titleCaseWords = (value) =>
   String(value || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -154,6 +166,9 @@ const titleCaseWords = (value) =>
     .replace(/\bTmp\b/g, "TMP");
 
 const formatReportLabel = (key) => titleCaseWords(key);
+
+const shouldShowReportField = ([key]) =>
+  !INTERNAL_REPORT_FIELDS.has(String(key || "").toLowerCase());
 
 const formatReportValue = (value) => {
   if (Array.isArray(value)) {
@@ -559,6 +574,7 @@ const deleteJobFile = async (fileId) => {
 
 const detailRows = (report) =>
   Object.entries(report.fields || {})
+    .filter(shouldShowReportField)
     .map(
       ([key, value]) => `
         <tr>

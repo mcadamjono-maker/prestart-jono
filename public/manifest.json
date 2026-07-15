@@ -1,7 +1,7 @@
 {
   "name": "WDL Field Forms",
   "short_name": "WDL Forms",
-  "description": "Williams Drainage field forms for prestarts, incidents, purchase requests, job variations, hazard IDs, and as-built plans.",
+  "description": "Williams Drainage field forms for prestarts, incidents, charge up records, job information, hazard IDs, and as-built plans.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

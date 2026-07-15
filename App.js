@@ -2283,6 +2283,7 @@ export default function App() {
     const loadSavedJobs = async () => {
       try {
         let nextJobOptions = DEFAULT_JOB_OPTIONS;
+        let loadedFirebaseJobs = false;
         const savedJobs = await AsyncStorage.getItem(JOB_STORAGE_KEY);
 
         if (!isMounted) return;
@@ -2309,13 +2310,14 @@ export default function App() {
 
             if (remoteJobs.length > 0) {
               nextJobOptions = remoteJobs;
+              loadedFirebaseJobs = true;
             }
           }
         } catch (error) {
           console.warn("Unable to load Firebase jobs", error);
         }
 
-        if (JOB_LIST_URL && nextJobOptions.length === DEFAULT_JOB_OPTIONS.length) {
+        if (JOB_LIST_URL && !loadedFirebaseJobs) {
           const response = await fetch(JOB_LIST_URL);
 
           if (!response.ok) {
@@ -2907,8 +2909,8 @@ export default function App() {
     const printedFile = await withTimeout(
       Print.printToFileAsync({
         html,
-        width: 842,
-        height: 595,
+        width: 595,
+        height: 842,
         base64: true,
       }),
       PDF_EXPORT_TIMEOUT_MS,
@@ -3440,10 +3442,76 @@ export default function App() {
       .join("\n");
   };
 
-  const getSignaturePoint = (event) => {
-    const { locationX, locationY } = event.nativeEvent;
-    const width = Math.max(signaturePadSize.width, 1);
-    const height = Math.max(signaturePadSize.height, 1);
+  const getEventLocation = (event, size, touchSource = null) => {
+    const nativeEvent = event.nativeEvent || {};
+    const directX = Number(
+      touchSource?.locationX ??
+        nativeEvent.locationX ??
+        nativeEvent.offsetX ??
+        nativeEvent.layerX
+    );
+    const directY = Number(
+      touchSource?.locationY ??
+        nativeEvent.locationY ??
+        nativeEvent.offsetY ??
+        nativeEvent.layerY
+    );
+
+    if (Number.isFinite(directX) && Number.isFinite(directY)) {
+      return { x: directX, y: directY };
+    }
+
+    if (IS_WEB) {
+      const target =
+        event.currentTarget ||
+        nativeEvent.currentTarget ||
+        nativeEvent.target ||
+        null;
+      const rect = target?.getBoundingClientRect?.();
+      const clientX = Number(touchSource?.clientX ?? nativeEvent.clientX);
+      const clientY = Number(touchSource?.clientY ?? nativeEvent.clientY);
+
+      if (rect && Number.isFinite(clientX) && Number.isFinite(clientY)) {
+        return {
+          x: clientX - rect.left,
+          y: clientY - rect.top,
+        };
+      }
+
+      const pageX = Number(touchSource?.pageX ?? nativeEvent.pageX);
+      const pageY = Number(touchSource?.pageY ?? nativeEvent.pageY);
+      const scrollX = Number(window?.scrollX || 0);
+      const scrollY = Number(window?.scrollY || 0);
+
+      if (rect && Number.isFinite(pageX) && Number.isFinite(pageY)) {
+        return {
+          x: pageX - scrollX - rect.left,
+          y: pageY - scrollY - rect.top,
+        };
+      }
+    }
+
+    if (
+      Number.isFinite(size?.width) &&
+      Number.isFinite(size?.height) &&
+      Number.isFinite(nativeEvent.pageX) &&
+      Number.isFinite(nativeEvent.pageY)
+    ) {
+      return {
+        x: nativeEvent.pageX,
+        y: nativeEvent.pageY,
+      };
+    }
+
+    return null;
+  };
+
+  const getPercentPoint = (location, size) => {
+    if (!location) return null;
+
+    const width = Math.max(size.width, 1);
+    const height = Math.max(size.height, 1);
+    const { x: locationX, y: locationY } = location;
 
     if (
       locationX < 0 ||
@@ -3460,24 +3528,14 @@ export default function App() {
     };
   };
 
+  const getSignaturePoint = (event) =>
+    getPercentPoint(getEventLocation(event, signaturePadSize), signaturePadSize);
+
   const getAsBuiltPoint = (event) => {
-    const { locationX, locationY } = event.nativeEvent;
-    const width = Math.max(asBuiltBoardSize.width, 1);
-    const height = Math.max(asBuiltBoardSize.height, 1);
-
-    if (
-      locationX < 0 ||
-      locationX > width ||
-      locationY < 0 ||
-      locationY > height
-    ) {
-      return null;
-    }
-
-    return {
-      x: (locationX / width) * 100,
-      y: (locationY / height) * 100,
-    };
+    return getPercentPoint(
+      getEventLocation(event, asBuiltBoardSize),
+      asBuiltBoardSize
+    );
   };
 
   const getAsBuiltTouchPoints = (event) => {
@@ -3490,11 +3548,10 @@ export default function App() {
         : nativeEvent.changedTouches || [];
 
     return Array.from(touches)
-      .map((touch) => ({
-        x: Number.isFinite(touch.locationX) ? touch.locationX : touch.pageX,
-        y: Number.isFinite(touch.locationY) ? touch.locationY : touch.pageY,
-      }))
-      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+      .map((touch) => getEventLocation(event, asBuiltBoardSize, touch))
+      .filter(
+        (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y)
+      );
   };
 
   const getAsBuiltTwoFingerInfo = (event) => {
@@ -3590,25 +3647,11 @@ export default function App() {
     return true;
   };
 
-  const getAsBuiltSignaturePoint = (event) => {
-    const { locationX, locationY } = event.nativeEvent;
-    const width = Math.max(asBuiltSignaturePadSize.width, 1);
-    const height = Math.max(asBuiltSignaturePadSize.height, 1);
-
-    if (
-      locationX < 0 ||
-      locationX > width ||
-      locationY < 0 ||
-      locationY > height
-    ) {
-      return null;
-    }
-
-    return {
-      x: (locationX / width) * 100,
-      y: (locationY / height) * 100,
-    };
-  };
+  const getAsBuiltSignaturePoint = (event) =>
+    getPercentPoint(
+      getEventLocation(event, asBuiltSignaturePadSize),
+      asBuiltSignaturePadSize
+    );
 
   const signaturePanResponder = useMemo(
     () =>

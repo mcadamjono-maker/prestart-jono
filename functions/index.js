@@ -203,6 +203,8 @@ const publicJobInfo = async (jobRef) => {
 
 const titleCaseWords = (value) =>
   String(value || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -215,6 +217,16 @@ const titleCaseWords = (value) =>
     .replace(/\bCof\b/g, "COF")
     .replace(/\bRuc\b/g, "RUC")
     .replace(/\bTmp\b/g, "TMP");
+
+const INTERNAL_REPORT_FIELDS = new Set([
+  "template",
+  "report_type",
+  "recipient_email",
+  "to_email",
+  "sender_email",
+  "from_email",
+  "email_body",
+]);
 
 const formatReportLabel = (key) => titleCaseWords(key);
 
@@ -429,7 +441,9 @@ const buildSectionHtml = (section) => `
 `;
 
 const buildFieldsFallbackHtml = (fields) => {
-  const rows = Object.entries(fields || {}).map(([label, value]) => ({ label, value }));
+  const rows = Object.entries(fields || {})
+    .filter(([label]) => !INTERNAL_REPORT_FIELDS.has(String(label || "").toLowerCase()))
+    .map(([label, value]) => ({ label, value }));
 
   if (!rows.length) return "";
 
@@ -1569,19 +1583,36 @@ exports.dashboard = onRequest(
         }
 
         if (resource === "calendar") {
-          const weekStart = String(
-            request.query?.weekStart || getWeekStartIso(new Date())
-          ).slice(0, 10);
+          const weekStart = normaliseWeekStart(request.query?.weekStart);
+          const startDate = new Date(`${weekStart}T00:00:00.000Z`);
+          const weekDates = new Set(
+            Array.from({ length: 7 }, (_, index) => {
+              const date = new Date(startDate);
+              date.setUTCDate(startDate.getUTCDate() + index);
+              return date.toISOString().slice(0, 10);
+            })
+          );
+          const getSignOnDate = (signOn = {}) => {
+            const explicitDate = String(signOn.date || "").slice(0, 10);
+
+            if (/^\d{4}-\d{2}-\d{2}$/.test(explicitDate)) {
+              return explicitDate;
+            }
+
+            const signedAtIso = String(signOn.signedAtIso || "").trim();
+            const signedAt = String(signOn.signedAt || "").trim();
+            const parsed = parseSignedAtDate(signedAtIso || signedAt, startDate);
+
+            return parsed.toISOString().slice(0, 10);
+          };
           const [reportsSnapshot, draftsSnapshot] = await Promise.all([
             reportsCollection
               .where("reportType", "==", "Hazard ID")
-              .where("weekStart", "==", weekStart)
-              .limit(200)
+              .limit(500)
               .get(),
             db
               .collection("hazardIds")
-              .where("weekStart", "==", weekStart)
-              .limit(200)
+              .limit(500)
               .get(),
           ]);
           const entries = [];
@@ -1592,13 +1623,17 @@ exports.dashboard = onRequest(
 
           hazardDocs.forEach((report) => {
             (report.signOns || []).forEach((signOn) => {
+              const signOnDate = getSignOnDate(signOn);
+
+              if (!weekDates.has(signOnDate)) return;
+
               entries.push({
                 reportId: report.id,
                 jobName: report.jobName || report.siteAddress || report.subject,
                 siteAddress: report.siteAddress,
                 taskDescription: report.formData?.taskDescription || "",
                 name: signOn.name,
-                date: signOn.date,
+                date: signOnDate,
                 signedAt: signOn.signedAt,
               });
             });
