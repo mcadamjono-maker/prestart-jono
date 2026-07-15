@@ -2057,6 +2057,10 @@ export default function App() {
   const hazardDraftLoadRef = useRef(0);
   const hazardDraftSaveTimerRef = useRef(null);
   const isHydratingHazardDraftRef = useRef(false);
+  const hazardSignaturePadRef = useRef(null);
+  const asBuiltSignaturePadRef = useRef(null);
+  const hazardSignaturePointerRef = useRef(null);
+  const asBuiltSignaturePointerRef = useRef(null);
 
   useEffect(() => {
     if (!IS_WEB || typeof document === "undefined") return undefined;
@@ -3428,7 +3432,9 @@ export default function App() {
     if (!IS_WEB) return;
 
     event?.preventDefault?.();
+    event?.stopPropagation?.();
     event?.nativeEvent?.preventDefault?.();
+    event?.nativeEvent?.stopPropagation?.();
   };
 
   const getHazardSignOnSummary = () => {
@@ -3528,8 +3534,11 @@ export default function App() {
     };
   };
 
-  const getSignaturePoint = (event) =>
-    getPercentPoint(getEventLocation(event, signaturePadSize), signaturePadSize);
+  const getSignaturePoint = (event, touchSource = null) =>
+    getPercentPoint(
+      getEventLocation(event, signaturePadSize, touchSource),
+      signaturePadSize
+    );
 
   const getAsBuiltPoint = (event) => {
     return getPercentPoint(
@@ -3647,11 +3656,283 @@ export default function App() {
     return true;
   };
 
-  const getAsBuiltSignaturePoint = (event) =>
+  const getAsBuiltSignaturePoint = (event, touchSource = null) =>
     getPercentPoint(
-      getEventLocation(event, asBuiltSignaturePadSize),
+      getEventLocation(event, asBuiltSignaturePadSize, touchSource),
       asBuiltSignaturePadSize
     );
+
+  const getPrimaryWebTouchSource = (event) => {
+    const nativeEvent = event?.nativeEvent || event || {};
+    const touches =
+      nativeEvent.touches?.length > 0
+        ? nativeEvent.touches
+        : nativeEvent.changedTouches?.length > 0
+        ? nativeEvent.changedTouches
+        : [];
+
+    return touches[0] || nativeEvent;
+  };
+
+  const addSignaturePoint = (setStrokes, point, forceNewStroke = false) => {
+    if (!point) return;
+
+    setStrokes((currentStrokes) => {
+      if (forceNewStroke || currentStrokes.length === 0) {
+        return [...currentStrokes, [point]];
+      }
+
+      const nextStrokes = [...currentStrokes];
+      const lastStroke = nextStrokes[nextStrokes.length - 1] || [];
+      const lastPoint = lastStroke[lastStroke.length - 1] || point;
+
+      if (Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) > 22) {
+        return [...currentStrokes, [point]];
+      }
+
+      nextStrokes[nextStrokes.length - 1] = [...lastStroke, point];
+
+      return nextStrokes;
+    });
+  };
+
+  const startWebSignatureStroke = ({
+    event,
+    pointerRef,
+    getPoint,
+    setStrokes,
+    setDrawing,
+    pointerId = "touch",
+  }) => {
+    if (!IS_WEB || isSubmitting) return;
+    if (pointerId === "touch" && pointerRef.current !== null) return;
+
+    blockWebTouchEvent(event);
+    const point = getPoint(event, getPrimaryWebTouchSource(event));
+
+    if (!point) return;
+
+    pointerRef.current = pointerId;
+    setDrawing(true);
+    addSignaturePoint(setStrokes, point, true);
+  };
+
+  const moveWebSignatureStroke = ({
+    event,
+    pointerRef,
+    getPoint,
+    setStrokes,
+    expectedPointerId = "touch",
+  }) => {
+    if (!IS_WEB || isSubmitting || pointerRef.current !== expectedPointerId) {
+      return;
+    }
+
+    blockWebTouchEvent(event);
+    addSignaturePoint(
+      setStrokes,
+      getPoint(event, getPrimaryWebTouchSource(event))
+    );
+  };
+
+  const endWebSignatureStroke = ({ event, pointerRef, setDrawing }) => {
+    if (!IS_WEB) return;
+
+    blockWebTouchEvent(event);
+    pointerRef.current = null;
+    setDrawing(false);
+  };
+
+  const hazardSignatureWebHandlers = IS_WEB
+    ? {
+        onPointerDown: (event) => {
+          const nativeEvent = event.nativeEvent || {};
+          const pointerId =
+            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
+
+          if (nativeEvent.pointerId !== undefined) {
+            try {
+              event.currentTarget?.setPointerCapture?.(nativeEvent.pointerId);
+            } catch {
+              // Some synthetic/webview pointer events do not allow capture.
+            }
+          }
+          startWebSignatureStroke({
+            event,
+            pointerRef: hazardSignaturePointerRef,
+            getPoint: getSignaturePoint,
+            setStrokes: setHazardSignatureStrokes,
+            setDrawing: setIsDrawingSignature,
+            pointerId,
+          });
+        },
+        onPointerMove: (event) => {
+          const nativeEvent = event.nativeEvent || {};
+          const pointerId =
+            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
+
+          moveWebSignatureStroke({
+            event,
+            pointerRef: hazardSignaturePointerRef,
+            getPoint: getSignaturePoint,
+            setStrokes: setHazardSignatureStrokes,
+            expectedPointerId: pointerId,
+          });
+        },
+        onPointerUp: (event) =>
+          endWebSignatureStroke({
+            event,
+            pointerRef: hazardSignaturePointerRef,
+            setDrawing: setIsDrawingSignature,
+          }),
+        onPointerCancel: (event) =>
+          endWebSignatureStroke({
+            event,
+            pointerRef: hazardSignaturePointerRef,
+            setDrawing: setIsDrawingSignature,
+          }),
+      }
+    : {};
+
+  const asBuiltSignatureWebHandlers = IS_WEB
+    ? {
+        onPointerDown: (event) => {
+          const nativeEvent = event.nativeEvent || {};
+          const pointerId =
+            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
+
+          if (nativeEvent.pointerId !== undefined) {
+            try {
+              event.currentTarget?.setPointerCapture?.(nativeEvent.pointerId);
+            } catch {
+              // Some synthetic/webview pointer events do not allow capture.
+            }
+          }
+          startWebSignatureStroke({
+            event,
+            pointerRef: asBuiltSignaturePointerRef,
+            getPoint: getAsBuiltSignaturePoint,
+            setStrokes: setAsBuiltDrainlayerSignatureStrokes,
+            setDrawing: setIsDrawingAsBuiltSignature,
+            pointerId,
+          });
+        },
+        onPointerMove: (event) => {
+          const nativeEvent = event.nativeEvent || {};
+          const pointerId =
+            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
+
+          moveWebSignatureStroke({
+            event,
+            pointerRef: asBuiltSignaturePointerRef,
+            getPoint: getAsBuiltSignaturePoint,
+            setStrokes: setAsBuiltDrainlayerSignatureStrokes,
+            expectedPointerId: pointerId,
+          });
+        },
+        onPointerUp: (event) =>
+          endWebSignatureStroke({
+            event,
+            pointerRef: asBuiltSignaturePointerRef,
+            setDrawing: setIsDrawingAsBuiltSignature,
+          }),
+        onPointerCancel: (event) =>
+          endWebSignatureStroke({
+            event,
+            pointerRef: asBuiltSignaturePointerRef,
+            setDrawing: setIsDrawingAsBuiltSignature,
+          }),
+      }
+    : {};
+
+  useEffect(() => {
+    if (!IS_WEB) return undefined;
+
+    const resolveDomNode = (ref) => {
+      const node = ref.current;
+
+      if (node?.addEventListener) return node;
+
+      const innerNode = node?.getNode?.();
+
+      if (innerNode?.addEventListener) return innerNode;
+
+      return null;
+    };
+
+    const bindTouchSignaturePad = ({
+      ref,
+      pointerRef,
+      getPoint,
+      setStrokes,
+      setDrawing,
+    }) => {
+      const node = resolveDomNode(ref);
+
+      if (!node) return () => {};
+
+      const onTouchStart = (event) =>
+        startWebSignatureStroke({
+          event,
+          pointerRef,
+          getPoint,
+          setStrokes,
+          setDrawing,
+        });
+      const onTouchMove = (event) =>
+        moveWebSignatureStroke({
+          event,
+          pointerRef,
+          getPoint,
+          setStrokes,
+        });
+      const onTouchEnd = (event) =>
+        endWebSignatureStroke({
+          event,
+          pointerRef,
+          setDrawing,
+        });
+      const options = { passive: false };
+
+      node.addEventListener("touchstart", onTouchStart, options);
+      node.addEventListener("touchmove", onTouchMove, options);
+      node.addEventListener("touchend", onTouchEnd, options);
+      node.addEventListener("touchcancel", onTouchEnd, options);
+
+      return () => {
+        node.removeEventListener("touchstart", onTouchStart, options);
+        node.removeEventListener("touchmove", onTouchMove, options);
+        node.removeEventListener("touchend", onTouchEnd, options);
+        node.removeEventListener("touchcancel", onTouchEnd, options);
+      };
+    };
+
+    const unbindHazardPad = bindTouchSignaturePad({
+      ref: hazardSignaturePadRef,
+      pointerRef: hazardSignaturePointerRef,
+      getPoint: getSignaturePoint,
+      setStrokes: setHazardSignatureStrokes,
+      setDrawing: setIsDrawingSignature,
+    });
+    const unbindAsBuiltPad = bindTouchSignaturePad({
+      ref: asBuiltSignaturePadRef,
+      pointerRef: asBuiltSignaturePointerRef,
+      getPoint: getAsBuiltSignaturePoint,
+      setStrokes: setAsBuiltDrainlayerSignatureStrokes,
+      setDrawing: setIsDrawingAsBuiltSignature,
+    });
+
+    return () => {
+      unbindHazardPad();
+      unbindAsBuiltPad();
+    };
+  }, [
+    activePage,
+    asBuiltSignaturePadSize,
+    isHazardSignOnOpen,
+    isSubmitting,
+    signaturePadSize,
+  ]);
 
   const signaturePanResponder = useMemo(
     () =>
@@ -6478,6 +6759,7 @@ export default function App() {
 
                     <Text style={styles.inputLabel}>Signature</Text>
                     <View
+                      ref={hazardSignaturePadRef}
                       style={styles.signaturePad}
                       dataSet={{ wdlTouchLock: "true" }}
                       onLayout={(event) => {
@@ -6485,7 +6767,9 @@ export default function App() {
 
                         setSignaturePadSize({ width, height });
                       }}
-                      {...signaturePanResponder.panHandlers}
+                      {...(IS_WEB
+                        ? hazardSignatureWebHandlers
+                        : signaturePanResponder.panHandlers)}
                     >
                       <StableSignatureInk strokes={hazardSignatureStrokes} />
                     </View>
@@ -6723,6 +7007,7 @@ export default function App() {
 
                 <Text style={styles.inputLabel}>Drainlayer Signature</Text>
                 <View
+                  ref={asBuiltSignaturePadRef}
                   style={styles.signaturePad}
                   dataSet={{ wdlTouchLock: "true" }}
                   onLayout={(event) => {
@@ -6730,7 +7015,9 @@ export default function App() {
 
                     setAsBuiltSignaturePadSize({ width, height });
                   }}
-                  {...asBuiltSignaturePanResponder.panHandlers}
+                  {...(IS_WEB
+                    ? asBuiltSignatureWebHandlers
+                    : asBuiltSignaturePanResponder.panHandlers)}
                 >
                   <StableSignatureInk
                     strokes={asBuiltDrainlayerSignatureStrokes}

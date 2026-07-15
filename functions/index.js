@@ -843,6 +843,18 @@ const publicHazardDraft = (doc) => {
       site_address: data.siteAddress || "",
       task_description: data.taskDescription || "",
       prepared_by: data.preparedBy || "",
+      start_date: data.startDate || "",
+      finish_date: data.finishDate || "",
+      yard_checks: data.yardChecks || {},
+      site_checks: data.siteChecks || {},
+      hazards_risks: data.risks || "",
+      controls: data.controls || {},
+      extra_controls: data.extraControls || "",
+      toolbox_meeting: data.toolboxMeeting || "",
+      sign_off_notes: data.signOffNotes || "",
+      signed_on_workers: signOns
+        .map((signOn, index) => `${index + 1}. ${signOn.name} - ${signOn.signedAt}`)
+        .join("\n"),
     },
     formData: {
       jobNumber: data.jobNumber || "",
@@ -1517,16 +1529,11 @@ exports.dashboard = onRequest(
 
       if (request.method === "GET") {
         if (resource === "summary") {
-          const currentWeekStart = getWeekStartIso(new Date());
           const [reportsSnapshot, jobsSnapshot, hazardDraftsSnapshot] =
             await Promise.all([
             reportsCollection.orderBy("submittedAt", "desc").limit(120).get(),
             db.collection("jobs").orderBy("number").get(),
-            db
-              .collection("hazardIds")
-              .where("weekStart", "==", currentWeekStart)
-              .limit(200)
-              .get(),
+            db.collection("hazardIds").limit(500).get(),
           ]);
           const reports = reportsSnapshot.docs.map(publicReport);
           const purchaseRequests = reports.filter(
@@ -1535,8 +1542,18 @@ exports.dashboard = onRequest(
           const chargeUpReports = reports.filter(
             (report) => report.reportType === "Charge Up Job Record"
           );
+          const openHazardDrafts = hazardDraftsSnapshot.docs
+            .map(publicHazardDraft)
+            .filter((hazardDraft) =>
+              String(hazardDraft.status || "").toLowerCase().includes("active")
+            )
+            .sort((firstDraft, secondDraft) =>
+              String(secondDraft.submittedAtIso || "").localeCompare(
+                String(firstDraft.submittedAtIso || "")
+              )
+            );
           const hazardReports = [
-            ...hazardDraftsSnapshot.docs.map(publicHazardDraft),
+            ...openHazardDrafts,
             ...reports.filter((report) => report.reportType === "Hazard ID"),
           ];
 

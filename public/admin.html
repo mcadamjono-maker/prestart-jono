@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111111" />
     <title>WDL Office Dashboard</title>
     <link rel="icon" href="/favicon.ico" />
-    <link rel="stylesheet" href="/admin.css?v=20260710-4" />
+    <link rel="stylesheet" href="/admin.css?v=20260716-1" />
   </head>
   <body>
     <header class="topbar">
@@ -48,6 +48,7 @@
 
       <nav class="tabs" aria-label="Dashboard sections">
         <button class="active" data-tab="reports" type="button">Reports</button>
+        <button data-tab="openHazards" type="button">Open Hazard IDs</button>
         <button data-tab="calendar" type="button">Calendar</button>
         <button data-tab="jobs" type="button">Jobs & Files</button>
       </nav>
@@ -71,6 +72,16 @@
           </div>
         </div>
         <div id="reportsList" class="list"></div>
+      </section>
+
+      <section id="openHazards" class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Open Hazard IDs</h2>
+            <p>Active weekly Hazard IDs that have been saved but not submitted.</p>
+          </div>
+        </div>
+        <div id="openHazardsList" class="list"></div>
       </section>
 
       <section id="calendar" class="panel">

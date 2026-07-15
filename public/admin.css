@@ -211,6 +211,25 @@ main {
   font-size: 16px;
 }
 
+.hazard-draft-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.hazard-draft-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

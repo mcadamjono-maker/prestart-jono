@@ -276,10 +276,24 @@ const signatureSectionsHtml = (report) => {
   return sections.join("");
 };
 
+const isOpenHazard = (hazard) =>
+  String(hazard?.status || "").toLowerCase().includes("active");
+
+const hazardSignOnCount = (hazard) => {
+  const formSignOns = hazard?.formData?.signOns;
+
+  if (Array.isArray(formSignOns)) return formSignOns.length;
+  if (Array.isArray(hazard?.signOns)) return hazard.signOns.length;
+
+  return 0;
+};
+
 const renderMetrics = () => {
+  const openHazards = state.hazardReports.filter(isOpenHazard);
+
   setText("#reportCount", state.reports.length);
   setText("#chargeUpCount", state.chargeUpReports.length);
-  setText("#hazardCount", state.hazardReports.length);
+  setText("#hazardCount", openHazards.length);
   setText("#jobCount", state.jobs.filter((job) => !job.completed).length);
 };
 
@@ -309,6 +323,46 @@ const renderReports = () => {
           </article>`
       )
       .join("") || emptyHtml()
+  );
+};
+
+const renderOpenHazards = () => {
+  const openHazards = state.hazardReports.filter(isOpenHazard);
+
+  setHtml(
+    "#openHazardsList",
+    openHazards
+      .map((hazard) => {
+        const title =
+          hazard.jobName ||
+          hazard.siteAddress ||
+          hazard.jobNumber ||
+          "Untitled Hazard ID";
+        const weekStart = formatDisplayDate(hazard.weekStart || hazard.formData?.weekStart);
+        const signOnCount = hazardSignOnCount(hazard);
+
+        return `
+          <article class="record hazard-draft-record">
+            <div>
+              <h3>${escapeHtml(title)}</h3>
+              <div class="meta">
+                ${escapeHtml(hazard.jobNumber ? `Job ${hazard.jobNumber}` : "No job number")}
+                ${weekStart ? ` | Week starting ${escapeHtml(weekStart)}` : ""}
+                ${hazard.requestedBy ? ` | Prepared by ${escapeHtml(hazard.requestedBy)}` : ""}
+              </div>
+              <div class="hazard-draft-summary">
+                <span>${escapeHtml(signOnCount)} signed on</span>
+                <span>Last saved ${escapeHtml(formatDate(hazard.submittedAtIso))}</span>
+              </div>
+            </div>
+            <div class="actions">
+              <span class="badge">${escapeHtml(hazard.status || "Active Draft")}</span>
+              <button type="button" data-open-hazard="${escapeHtml(hazard.id)}">Open</button>
+            </div>
+          </article>`;
+      })
+      .join("") ||
+      '<div class="empty">No open Hazard IDs. Saved weekly Hazard IDs will appear here until they are submitted.</div>'
   );
 };
 
@@ -679,11 +733,7 @@ const printableHtml = (report) => `
   </body>
 </html>`;
 
-const openReport = (reportId) => {
-  const report = state.reports.find((item) => item.id === reportId);
-
-  if (!report) return;
-
+const openReportObject = (report) => {
   state.selectedReport = report;
   setHtml(
     "#reportDetail",
@@ -712,6 +762,18 @@ const openReport = (reportId) => {
   setAttributeSafe("#reportDrawer", "aria-hidden", "false");
 };
 
+const openReport = (reportId) => {
+  const report = state.reports.find((item) => item.id === reportId);
+
+  if (report) openReportObject(report);
+};
+
+const openHazard = (hazardId) => {
+  const hazard = state.hazardReports.find((item) => item.id === hazardId);
+
+  if (hazard) openReportObject(hazard);
+};
+
 const closeReport = () => {
   setAttributeSafe("#reportDrawer", "aria-hidden", "true");
   state.selectedReport = null;
@@ -736,6 +798,7 @@ const loadSummary = async () => {
 
   renderMetrics();
   renderReports();
+  renderOpenHazards();
   renderJobs();
   renderSelectedJobInfo();
 };
@@ -911,11 +974,13 @@ const init = () => {
 
   document.body.addEventListener("click", (event) => {
     const openReportId = event.target.closest("[data-open-report]")?.dataset.openReport;
+    const openHazardId = event.target.closest("[data-open-hazard]")?.dataset.openHazard;
     const selectJobNumber = event.target.closest("[data-select-job]")?.dataset.selectJob;
     const deleteFileId = event.target.closest("[data-delete-file]")?.dataset.deleteFile;
     const completeJobButton = event.target.closest("[data-complete-job]");
 
     if (openReportId) openReport(openReportId);
+    if (openHazardId) openHazard(openHazardId);
     if (selectJobNumber) selectJob(selectJobNumber).catch((error) => alert(error.message));
     if (deleteFileId) deleteJobFile(deleteFileId).catch((error) => alert(error.message));
     if (event.target.closest("#toggleCompletedJobs")) toggleCompletedJobs();
