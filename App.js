@@ -484,15 +484,37 @@ const getTodayDisplayDate = () =>
     year: "numeric",
   });
 
+const getNzIsoDate = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-NZ", {
+    timeZone: "Pacific/Auckland",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+const addDaysToIsoDate = (isoDate, days) => {
+  const [year, month, day] = String(isoDate || getNzIsoDate())
+    .split("-")
+    .map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
+};
+
 const getCurrentWeekStartIso = () => {
-  const weekDate = new Date();
-  const day = weekDate.getDay();
+  const nzDate = getNzIsoDate();
+  const [year, month, dayOfMonth] = nzDate.split("-").map(Number);
+  const weekDate = new Date(Date.UTC(year, month - 1, dayOfMonth));
+  const day = weekDate.getUTCDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
 
-  weekDate.setHours(0, 0, 0, 0);
-  weekDate.setDate(weekDate.getDate() + diffToMonday);
-
-  return weekDate.toISOString().slice(0, 10);
+  return addDaysToIsoDate(nzDate, diffToMonday);
 };
 
 const formatFieldValue = (value, fallback = "Not supplied") => {

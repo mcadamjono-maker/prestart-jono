@@ -12,6 +12,7 @@ const DEFAULT_JOB_INFO_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
 const ALLOWED_RECIPIENT_EMAILS = [DEFAULT_TO_EMAIL.toLowerCase()];
+const NZ_TIME_ZONE = "Pacific/Auckland";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -557,6 +558,54 @@ const normaliseAttachments = (attachments = []) => {
   });
 };
 
+const storeReportAttachments = async (reportId, attachments = []) => {
+  if (!attachments.length) return [];
+
+  const bucket = getJobFilesBucket();
+
+  return Promise.all(
+    attachments.map(async (attachment, index) => {
+      const attachmentId = String(index + 1);
+      const filename = normaliseFilename(attachment.filename, index);
+      const contentType = attachment.contentType || "image/jpeg";
+      const contentBuffer = Buffer.from(String(attachment.content || ""), "base64");
+      const storageName = filename.replace(/[^\w.\-]/g, "_");
+      const storagePath = `report-attachments/${reportId}/${attachmentId}-${storageName}`;
+
+      await bucket.file(storagePath).save(contentBuffer, {
+        resumable: false,
+        metadata: {
+          contentType,
+          metadata: {
+            reportId,
+            attachmentId,
+            originalFilename: filename,
+          },
+        },
+      });
+
+      return {
+        id: attachmentId,
+        filename,
+        contentType,
+        size: contentBuffer.length,
+        storagePath,
+      };
+    })
+  );
+};
+
+const deleteStoredAttachments = async (attachments = []) => {
+  await Promise.all(
+    attachments
+      .map((attachment) => attachment.storagePath)
+      .filter(Boolean)
+      .map((storagePath) =>
+        getJobFilesBucket().file(storagePath).delete({ ignoreNotFound: true })
+      )
+  );
+};
+
 const toPlainObject = (value) =>
   value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
@@ -622,27 +671,51 @@ const getReportStatus = (reportType, fields = {}) => {
     return getStringField(fields, ["status"]) || "Pending";
   }
 
-  if (heading === "hazard id") return "Active";
-
   return "Filed";
 };
 
-const getWeekStartIso = (date = new Date()) => {
-  const weekDate = new Date(date);
-  const day = weekDate.getDay();
+const getNzIsoDate = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-NZ", {
+    timeZone: NZ_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+const isIsoDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+
+const addDaysToIsoDate = (isoDate, days) => {
+  if (!isIsoDate(isoDate)) return getNzIsoDate();
+
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
+};
+
+const getWeekStartFromIsoDate = (isoDate) => {
+  const cleanIsoDate = isIsoDate(isoDate) ? isoDate : getNzIsoDate();
+  const [year, month, dayOfMonth] = cleanIsoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, dayOfMonth));
+  const day = date.getUTCDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
 
-  weekDate.setHours(0, 0, 0, 0);
-  weekDate.setDate(weekDate.getDate() + diffToMonday);
-
-  return weekDate.toISOString().slice(0, 10);
+  return addDaysToIsoDate(cleanIsoDate, diffToMonday);
 };
+
+const getWeekStartIso = (date = new Date()) => getWeekStartFromIsoDate(getNzIsoDate(date));
 
 const normaliseWeekStart = (weekStart) => {
   const cleanedWeekStart = String(weekStart || "").trim().slice(0, 10);
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cleanedWeekStart)) {
-    return cleanedWeekStart;
+  if (isIsoDate(cleanedWeekStart)) {
+    return getWeekStartFromIsoDate(cleanedWeekStart);
   }
 
   return getWeekStartIso(new Date());
@@ -687,7 +760,7 @@ const normaliseSignOns = (formData = {}, fields = {}, submittedAt = new Date()) 
           name,
           signedAt: signedAt || submittedAt.toISOString(),
           signedAtIso: signedAtIso || signedDate.toISOString(),
-          date: signedDate.toISOString().slice(0, 10),
+          date: getNzIsoDate(signedDate),
           weekStart: getWeekStartIso(signedDate),
           signatureCaptured: Boolean(signOn?.signatureCaptured),
         };
@@ -711,7 +784,7 @@ const normaliseSignOns = (formData = {}, fields = {}, submittedAt = new Date()) 
       return {
         name: match[1].trim(),
         signedAt: match[2].trim(),
-        date: signedDate.toISOString().slice(0, 10),
+        date: getNzIsoDate(signedDate),
         weekStart: getWeekStartIso(signedDate),
         signatureCaptured: true,
       };
@@ -746,7 +819,7 @@ const normaliseHazardDraftSignOns = (signOns = [], submittedAt = new Date()) => 
         name,
         signedAt: signedAt || submittedAt.toISOString(),
         signedAtIso: signedAtIso || signedDate.toISOString(),
-        date: signedDate.toISOString().slice(0, 10),
+        date: getNzIsoDate(signedDate),
         weekStart: getWeekStartIso(signedDate),
         signatureCaptured: signatureStrokes.length > 0,
         signatureStrokesJson: JSON.stringify(signatureStrokes).slice(0, 60000),
@@ -892,6 +965,154 @@ const publicHazardDraft = (doc) => {
   };
 };
 
+const getSubmittedAtNz = (date = new Date()) =>
+  new Intl.DateTimeFormat("en-NZ", {
+    timeZone: NZ_TIME_ZONE,
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+
+const formatReportTextValue = (value, fallback = "Not supplied") => {
+  const formatted = formatReportValue(value);
+
+  return formatted && formatted !== "Not supplied" ? formatted : fallback;
+};
+
+const formatReportTextRow = ([label, value]) => {
+  const formattedValue = formatReportTextValue(value);
+
+  if (formattedValue.includes("\n")) {
+    return `${label}:\n  ${formattedValue.replace(/\n/g, "\n  ")}`;
+  }
+
+  return `${label}: ${formattedValue}`;
+};
+
+const buildFiledEmailText = ({ title, reference, sections }) => {
+  const lines = [
+    "WILLIAMS DRAINAGE LIMITED",
+    String(title || "Report").toUpperCase(),
+    reference ? `Reference: ${reference}` : "",
+    `Submitted: ${getSubmittedAtNz()}`,
+    "",
+    "----------------------------------------",
+  ].filter(Boolean);
+
+  sections.forEach((section) => {
+    lines.push("", String(section.title || "Details").toUpperCase());
+
+    section.rows.forEach((row) => {
+      lines.push(formatReportTextRow(row));
+    });
+  });
+
+  return lines.join("\n");
+};
+
+const selectedMapLabels = (value = {}) => {
+  const selectedLabels = Object.entries(toPlainObject(value))
+    .filter(([, isSelected]) => Boolean(isSelected))
+    .map(([label]) => label);
+
+  return selectedLabels.length ? selectedLabels.join("\n") : "None selected";
+};
+
+const hazardSignOnSummary = (signOns = []) => {
+  if (!Array.isArray(signOns) || signOns.length === 0) {
+    return "No workers signed on.";
+  }
+
+  return signOns
+    .map((signOn, index) => `${index + 1}. ${signOn.name} - ${signOn.signedAt}`)
+    .join("\n");
+};
+
+const buildHazardDraftReportPayload = (hazardDoc) => {
+  const hazard = publicHazardDraft(hazardDoc);
+  const subject = `Hazard ID - ${
+    hazard.siteAddress || hazard.jobName || hazard.jobNumber || "Untitled"
+  }`;
+  const signedOnWorkers = hazardSignOnSummary(hazard.signOns);
+  const message = buildFiledEmailText({
+    title: "Hazard Identification Worksheet",
+    reference: hazard.jobName || hazard.jobNumber,
+    sections: [
+      {
+        title: "Task Details",
+        rows: [
+          ["Job Name", hazard.jobName],
+          ["Job Number", hazard.jobNumber],
+          ["Week Starting", hazard.weekStart],
+          ["Site Address", hazard.siteAddress],
+          ["Task Description", hazard.formData?.taskDescription],
+          ["Prepared By", hazard.requestedBy],
+          ["Start Date", hazard.formData?.startDate],
+          ["Finish Date", hazard.formData?.finishDate],
+        ],
+      },
+      {
+        title: "Pre Start Checks",
+        rows: [
+          ["At Yard", selectedMapLabels(hazard.yardChecks)],
+          ["At Site", selectedMapLabels(hazard.siteChecks)],
+        ],
+      },
+      {
+        title: "Hazards and Controls",
+        rows: [
+          ["Hazards / Risks", hazard.risks],
+          ["Controls in Place", selectedMapLabels(hazard.controls)],
+          ["Other Controls / Notes", hazard.extraControls],
+        ],
+      },
+      {
+        title: "Communication",
+        rows: [
+          ["Toolbox Meeting Notes", hazard.toolboxMeeting],
+          ["Worker / Contractor Sign-off Notes", hazard.signOffNotes],
+          ["Signed-On Workers", signedOnWorkers],
+        ],
+      },
+    ],
+  });
+
+  return {
+    reportType: "Hazard ID",
+    subject,
+    message,
+    fields: {
+      report_type: "Hazard Identification Worksheet",
+      template: "hazard_id",
+      job_number: hazard.jobNumber,
+      job_name: hazard.jobName || "",
+      week_start: hazard.weekStart,
+      site_address: hazard.siteAddress || "",
+      task_description: hazard.formData?.taskDescription || "",
+      prepared_by: hazard.requestedBy || "",
+      start_date: hazard.formData?.startDate || "Not supplied",
+      finish_date: hazard.formData?.finishDate || "Not supplied",
+      signed_on_workers: signedOnWorkers,
+    },
+    formData: {
+      jobNumber: hazard.jobNumber,
+      jobName: hazard.jobName || "",
+      weekStart: hazard.weekStart,
+      siteAddress: hazard.siteAddress || "",
+      taskDescription: hazard.formData?.taskDescription || "",
+      preparedBy: hazard.requestedBy || "",
+      startDate: hazard.formData?.startDate || "",
+      finishDate: hazard.formData?.finishDate || "",
+      signOns: hazard.signOns.map((signOn) => ({
+        name: signOn.name,
+        signedAt: signOn.signedAt,
+        signedAtIso: signOn.signedAtIso,
+        signatureCaptured: Boolean(signOn.signatureCaptured),
+        signatureStrokes: signOn.signatureStrokes || [],
+      })),
+    },
+  };
+};
+
 const buildStoredReport = ({
   reportType,
   subject,
@@ -940,9 +1161,12 @@ const buildStoredReport = ({
       "purchase_order_number",
       "po_number",
     ]),
-    attachmentSummary: attachments.map((attachment) => ({
+    attachmentSummary: attachments.map((attachment, index) => ({
+      id: attachment.id || String(index + 1),
       filename: attachment.filename,
       contentType: attachment.contentType,
+      size: attachment.size || 0,
+      storagePath: attachment.storagePath || "",
     })),
     signOns,
     submittedAt: admin.firestore.Timestamp.fromDate(now),
@@ -1021,6 +1245,85 @@ const smtpFrom = process.env.MAILEROO_FROM || DEFAULT_FROM_EMAIL;
 const smtpTo = process.env.MAILEROO_TO || DEFAULT_TO_EMAIL;
 const smtpReplyTo = process.env.MAILEROO_REPLY_TO || smtpTo;
 
+const createMailerTransporter = () => {
+  if (!smtpUser || !smtpPass) {
+    throw new Error("MAILEROO_SMTP_USER and MAILEROO_SMTP_PASS are not configured.");
+  }
+
+  const nodemailer = require("nodemailer");
+
+  return nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+  });
+};
+
+const sendAndStoreReport = async ({
+  reportType,
+  subject,
+  message,
+  recipientEmail,
+  fields = {},
+  formData = {},
+  attachments = [],
+}) => {
+  if (!message) {
+    throw new Error("Report message is required.");
+  }
+
+  const normalisedAttachments = normaliseAttachments(attachments);
+  const reportRef = getFirestore().collection("reports").doc();
+  const storedAttachments = await storeReportAttachments(
+    reportRef.id,
+    normalisedAttachments
+  );
+
+  try {
+    const transporter = createMailerTransporter();
+    const emailResult = await transporter.sendMail({
+      from: smtpFrom,
+      to: recipientEmail,
+      replyTo: smtpReplyTo,
+      subject,
+      text: `${formatReportHeading(reportType)}\n${subject}\n\nOpen this email in an HTML-capable mail app to view the filed report.`,
+      html: buildReportHtml({
+        reportType,
+        subject,
+        message,
+        fields,
+        formData,
+        attachments: normalisedAttachments,
+      }),
+      attachments: normalisedAttachments,
+    });
+
+    await reportRef.set(
+      buildStoredReport({
+        reportType,
+        subject,
+        message,
+        recipientEmail,
+        fields,
+        formData,
+        attachments: storedAttachments,
+      })
+    );
+
+    return {
+      emailResult,
+      reportRef,
+    };
+  } catch (error) {
+    await deleteStoredAttachments(storedAttachments);
+    throw error;
+  }
+};
+
 exports.sendReport = onRequest(
   {
     region: "australia-southeast1",
@@ -1041,13 +1344,6 @@ exports.sendReport = onRequest(
     }
 
     try {
-      if (!smtpUser || !smtpPass) {
-        response.status(500).json({
-          error: "MAILEROO_SMTP_USER and MAILEROO_SMTP_PASS are not configured.",
-        });
-        return;
-      }
-
       const reportType = normaliseReportType(request.body?.reportType);
       const subject = normaliseSubject(request.body?.subject);
       const message = String(request.body?.message || "").trim();
@@ -1055,54 +1351,17 @@ exports.sendReport = onRequest(
         request.body?.recipientEmail || request.body?.fields?.recipient_email
       );
 
-      if (!message) {
-        response.status(400).json({ error: "Report message is required." });
-        return;
-      }
-
-      const nodemailer = require("nodemailer");
-
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-
-      const attachments = normaliseAttachments(request.body?.attachments);
       const fields = toPlainObject(request.body?.fields);
       const formData = toPlainObject(request.body?.formData);
-
-      const emailResult = await transporter.sendMail({
-        from: smtpFrom,
-        to: recipientEmail,
-        replyTo: smtpReplyTo,
+      const { emailResult, reportRef } = await sendAndStoreReport({
+        reportType,
         subject,
-        text: `${formatReportHeading(reportType)}\n${subject}\n\nOpen this email in an HTML-capable mail app to view the filed report.`,
-        html: buildReportHtml({
-          reportType,
-          subject,
-          message,
-          fields,
-          formData,
-          attachments,
-        }),
-        attachments,
+        message,
+        fields,
+        formData,
+        recipientEmail,
+        attachments: request.body?.attachments,
       });
-      const reportRef = await getFirestore().collection("reports").add(
-        buildStoredReport({
-          reportType,
-          subject,
-          message,
-          recipientEmail,
-          fields,
-          formData,
-          attachments,
-        })
-      );
 
       response.status(200).json({
         ok: true,
@@ -1511,6 +1770,7 @@ exports.dashboard = onRequest(
     cors: true,
     memory: "512MiB",
     timeoutSeconds: 60,
+    secrets: ["MAILEROO_SMTP_USER", "MAILEROO_SMTP_PASS"],
   },
   async (request, response) => {
     if (request.method === "OPTIONS") {
@@ -1545,7 +1805,7 @@ exports.dashboard = onRequest(
           const openHazardDrafts = hazardDraftsSnapshot.docs
             .map(publicHazardDraft)
             .filter((hazardDraft) =>
-              String(hazardDraft.status || "").toLowerCase().includes("active")
+              String(hazardDraft.status || "").toLowerCase().includes("active draft")
             )
             .sort((firstDraft, secondDraft) =>
               String(secondDraft.submittedAtIso || "").localeCompare(
@@ -1599,28 +1859,72 @@ exports.dashboard = onRequest(
           return;
         }
 
+        if (resource === "attachment") {
+          const reportId = String(request.query?.reportId || "").trim();
+          const attachmentId = String(request.query?.attachmentId || "").trim();
+
+          if (!reportId || !attachmentId) {
+            response
+              .status(400)
+              .json({ error: "Report ID and attachment ID are required." });
+            return;
+          }
+
+          const reportDoc = await reportsCollection.doc(reportId).get();
+
+          if (!reportDoc.exists) {
+            response.status(404).send("Report not found.");
+            return;
+          }
+
+          const attachments = reportDoc.data()?.attachmentSummary || [];
+          const attachment =
+            attachments.find(
+              (item, index) =>
+                String(item.id || index + 1) === attachmentId
+            ) || null;
+
+          if (!attachment?.storagePath) {
+            response.status(404).send("Attachment file not found.");
+            return;
+          }
+
+          const [content] = await getJobFilesBucket()
+            .file(attachment.storagePath)
+            .download();
+
+          response.setHeader(
+            "Content-Type",
+            attachment.contentType || "application/octet-stream"
+          );
+          response.setHeader(
+            "Content-Disposition",
+            `inline; filename="${normaliseFilename(attachment.filename, 0)}"`
+          );
+          response.status(200).send(content);
+          return;
+        }
+
         if (resource === "calendar") {
           const weekStart = normaliseWeekStart(request.query?.weekStart);
-          const startDate = new Date(`${weekStart}T00:00:00.000Z`);
           const weekDates = new Set(
-            Array.from({ length: 7 }, (_, index) => {
-              const date = new Date(startDate);
-              date.setUTCDate(startDate.getUTCDate() + index);
-              return date.toISOString().slice(0, 10);
-            })
+            Array.from({ length: 7 }, (_, index) => addDaysToIsoDate(weekStart, index))
           );
           const getSignOnDate = (signOn = {}) => {
             const explicitDate = String(signOn.date || "").slice(0, 10);
 
-            if (/^\d{4}-\d{2}-\d{2}$/.test(explicitDate)) {
+            if (isIsoDate(explicitDate)) {
               return explicitDate;
             }
 
             const signedAtIso = String(signOn.signedAtIso || "").trim();
             const signedAt = String(signOn.signedAt || "").trim();
-            const parsed = parseSignedAtDate(signedAtIso || signedAt, startDate);
+            const parsed = parseSignedAtDate(
+              signedAtIso || signedAt,
+              new Date(`${weekStart}T00:00:00.000Z`)
+            );
 
-            return parsed.toISOString().slice(0, 10);
+            return getNzIsoDate(parsed);
           };
           const [reportsSnapshot, draftsSnapshot] = await Promise.all([
             reportsCollection
@@ -1727,6 +2031,55 @@ exports.dashboard = onRequest(
           response.status(200).json({
             ok: true,
             job: formatJob(jobDoc),
+          });
+          return;
+        }
+
+        if (action === "deleteHazardDraft") {
+          const hazardId = String(request.body?.hazardId || "").trim();
+
+          if (!hazardId) {
+            response.status(400).json({ error: "Hazard ID draft is required." });
+            return;
+          }
+
+          await db.collection("hazardIds").doc(hazardId).delete();
+          response.status(200).json({ ok: true });
+          return;
+        }
+
+        if (action === "submitHazardDraft") {
+          const hazardId = String(request.body?.hazardId || "").trim();
+          const recipientEmail = normaliseRecipientEmail(
+            request.body?.recipientEmail
+          );
+
+          if (!hazardId) {
+            response.status(400).json({ error: "Hazard ID draft is required." });
+            return;
+          }
+
+          const hazardRef = db.collection("hazardIds").doc(hazardId);
+          const hazardDoc = await hazardRef.get();
+
+          if (!hazardDoc.exists) {
+            response.status(404).json({ error: "Hazard ID draft was not found." });
+            return;
+          }
+
+          const reportPayload = buildHazardDraftReportPayload(hazardDoc);
+          const { emailResult, reportRef } = await sendAndStoreReport({
+            ...reportPayload,
+            recipientEmail,
+            attachments: [],
+          });
+
+          await hazardRef.delete();
+
+          response.status(200).json({
+            ok: true,
+            id: emailResult.messageId || null,
+            reportId: reportRef.id,
           });
           return;
         }

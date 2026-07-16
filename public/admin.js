@@ -76,6 +76,41 @@ const formatDate = (value) => {
   }).format(date);
 };
 
+const getNzIsoDate = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-NZ", {
+    timeZone: "Pacific/Auckland",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+const isIsoDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+
+const addDaysToIsoDate = (isoDate, days) => {
+  if (!isIsoDate(isoDate)) return getNzIsoDate();
+
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
+};
+
+const getWeekStartFromIsoDate = (isoDate) => {
+  const cleanIsoDate = isIsoDate(isoDate) ? isoDate : getNzIsoDate();
+  const [year, month, dayOfMonth] = cleanIsoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, dayOfMonth));
+  const day = date.getUTCDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  return addDaysToIsoDate(cleanIsoDate, diffToMonday);
+};
+
 const formatDisplayDate = (isoDate) => {
   const match = String(isoDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return String(isoDate || "");
@@ -94,7 +129,7 @@ const parseDisplayDate = (value) => {
     return `${displayMatch[3]}-${month}-${day}`;
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cleanedValue)) return cleanedValue;
+  if (isIsoDate(cleanedValue)) return cleanedValue;
 
   return "";
 };
@@ -277,7 +312,8 @@ const signatureSectionsHtml = (report) => {
 };
 
 const isOpenHazard = (hazard) =>
-  String(hazard?.status || "").toLowerCase().includes("active");
+  String(hazard?.status || "").toLowerCase().includes("active draft") ||
+  String(hazard?.subject || "").toLowerCase().includes("hazard id draft");
 
 const hazardSignOnCount = (hazard) => {
   const formSignOns = hazard?.formData?.signOns;
@@ -358,6 +394,8 @@ const renderOpenHazards = () => {
             <div class="actions">
               <span class="badge">${escapeHtml(hazard.status || "Active Draft")}</span>
               <button type="button" data-open-hazard="${escapeHtml(hazard.id)}">Open</button>
+              <button type="button" data-submit-hazard="${escapeHtml(hazard.id)}">Submit</button>
+              <button class="secondary danger" type="button" data-delete-hazard="${escapeHtml(hazard.id)}">Delete</button>
             </div>
           </article>`;
       })
@@ -367,20 +405,17 @@ const renderOpenHazards = () => {
 };
 
 const getWeekDates = (weekStart) => {
-  const start = new Date(`${weekStart}T00:00:00`);
+  const start = getWeekStartFromIsoDate(weekStart);
 
-  return Array.from({ length: 7 }, (_, index) => {
-    const day = new Date(start);
-    day.setDate(start.getDate() + index);
-    return day.toISOString().slice(0, 10);
-  });
+  return Array.from({ length: 7 }, (_, index) => addDaysToIsoDate(start, index));
 };
 
 const renderCalendar = () => {
-  const weekStart = parseDisplayDate($("#calendarWeek").value);
+  const parsedWeekStart = parseDisplayDate($("#calendarWeek").value);
 
-  if (!weekStart) return;
+  if (!parsedWeekStart) return;
 
+  const weekStart = getWeekStartFromIsoDate(parsedWeekStart);
   const days = getWeekDates(weekStart);
   const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -638,16 +673,65 @@ const detailRows = (report) =>
     )
     .join("");
 
+const attachmentUrl = (report, attachment, index) => {
+  const attachmentId = attachment?.id || String(index + 1);
+
+  if (!report?.id || !attachmentId || !attachment?.storagePath) return "";
+
+  return `${DASHBOARD_ENDPOINT}?resource=attachment&reportId=${encodeURIComponent(
+    report.id
+  )}&attachmentId=${encodeURIComponent(attachmentId)}&accessCode=${encodeURIComponent(
+    getAccessCode()
+  )}`;
+};
+
+const isImageAttachment = (attachment) =>
+  String(attachment?.contentType || "").toLowerCase().startsWith("image/");
+
 const attachmentRows = (report) =>
   (report.attachmentSummary || [])
     .map(
-      (attachment, index) => `
+      (attachment, index) => {
+        const url = attachmentUrl(report, attachment, index);
+
+        return `
         <tr>
           <th>Attachment ${index + 1}</th>
-          <td>${escapeHtml(attachment.filename || `File ${index + 1}`)}</td>
-        </tr>`
+          <td>
+            ${escapeHtml(attachment.filename || `File ${index + 1}`)}
+            ${
+              url
+                ? `<br /><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Open attachment</a>`
+                : '<br /><small>Stored before dashboard file links were added.</small>'
+            }
+          </td>
+        </tr>`;
+      }
     )
     .join("");
+
+const attachmentPreviewHtml = (report) => {
+  const previews = (report.attachmentSummary || [])
+    .map((attachment, index) => {
+      const url = attachmentUrl(report, attachment, index);
+
+      if (!url || !isImageAttachment(attachment)) return "";
+
+      return `
+        <figure>
+          <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+            <img src="${escapeHtml(url)}" alt="${escapeHtml(
+        attachment.filename || `Attachment ${index + 1}`
+      )}" />
+          </a>
+          <figcaption>${escapeHtml(attachment.filename || `Photo ${index + 1}`)}</figcaption>
+        </figure>`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  return previews ? `<div class="attachment-previews">${previews}</div>` : "";
+};
 
 const reportSummaryHtml = (report) => `
   <section class="report-summary-grid">
@@ -697,6 +781,10 @@ const printableHtml = (report) => `
       .signature-card strong { display: block; font-size: 13px; }
       .signature-card span { display: block; margin: 2px 0 7px; color: #666; font-size: 11px; }
       .report-signature { display: block; width: 220px; max-width: 100%; height: 82px; background: #fff; border: 1px solid #ddd; border-radius: 6px; }
+      .attachment-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 18px 0; }
+      .attachment-previews figure { margin: 0; border: 1px solid #ddd; border-radius: 8px; padding: 8px; background: #fff; }
+      .attachment-previews img { display: block; width: 100%; max-height: 260px; object-fit: contain; border-radius: 5px; background: #f3f3f3; }
+      .attachment-previews figcaption { margin-top: 6px; color: #555; font-size: 11px; overflow-wrap: anywhere; }
       pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #ddd; background: #f8f8f8; padding: 14px; font-size: 12px; }
       footer { margin-top: 20px; color: #777; font-size: 11px; }
       @media print {
@@ -722,6 +810,7 @@ const printableHtml = (report) => `
         <h2>Report Details</h2>
         <table>${detailRows(report) || "<tr><td>No extra fields supplied.</td></tr>"}</table>
         ${signatureSectionsHtml(report)}
+        ${attachmentPreviewHtml(report)}
         ${
           attachmentRows(report)
             ? `<h2>Attachments</h2><table>${attachmentRows(report)}</table>`
@@ -752,6 +841,7 @@ const openReportObject = (report) => {
       <h3>Report Details</h3>
       <table class="detail-table">${detailRows(report) || "<tr><td>No extra fields supplied.</td></tr>"}</table>
       ${signatureSectionsHtml(report)}
+      ${attachmentPreviewHtml(report)}
       ${
         attachmentRows(report)
           ? `<h3>Attachments</h3><table class="detail-table">${attachmentRows(report)}</table>`
@@ -804,12 +894,15 @@ const loadSummary = async () => {
 };
 
 const loadCalendar = async ({ silent = false } = {}) => {
-  const weekStart = parseDisplayDate($("#calendarWeek").value);
+  const parsedWeekStart = parseDisplayDate($("#calendarWeek").value);
 
-  if (!weekStart) {
+  if (!parsedWeekStart) {
     if (!silent) alert("Enter the week starting date as dd/mm/yyyy.");
     return;
   }
+
+  const weekStart = getWeekStartFromIsoDate(parsedWeekStart);
+  setValue("#calendarWeek", formatDisplayDate(weekStart));
 
   const payload = await dashboardFetch(`?resource=calendar&weekStart=${weekStart}`);
 
@@ -886,6 +979,60 @@ const setJobCompleted = async (jobNumber, completed) => {
   renderSelectedJobInfo();
 };
 
+const submitOpenHazard = async (hazardId) => {
+  if (!hazardId) return;
+
+  const hazard = state.hazardReports.find((item) => item.id === hazardId);
+  const title =
+    hazard?.jobName || hazard?.siteAddress || hazard?.jobNumber || "this Hazard ID";
+
+  if (
+    !window.confirm(
+      `Submit ${title}? This will email it, file it as a report, and remove it from Open Hazard IDs.`
+    )
+  ) {
+    return;
+  }
+
+  await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "submitHazardDraft",
+      hazardId,
+    }),
+  });
+
+  await loadSummary();
+  await loadCalendar({ silent: true });
+};
+
+const deleteOpenHazard = async (hazardId) => {
+  if (!hazardId) return;
+
+  const hazard = state.hazardReports.find((item) => item.id === hazardId);
+  const title =
+    hazard?.jobName || hazard?.siteAddress || hazard?.jobNumber || "this Hazard ID";
+
+  if (
+    !window.confirm(
+      `Delete ${title}? This removes the saved open Hazard ID and cannot be undone.`
+    )
+  ) {
+    return;
+  }
+
+  await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "deleteHazardDraft",
+      hazardId,
+    }),
+  });
+
+  await loadSummary();
+  await loadCalendar({ silent: true });
+};
+
 const toggleCompletedJobs = () => {
   state.showCompletedJobs = !state.showCompletedJobs;
   renderJobs();
@@ -895,17 +1042,13 @@ const handleCalendarWeekInput = () => {
   const parsedDate = parseDisplayDate($("#calendarWeek").value);
 
   if (parsedDate) {
-    setValue("#calendarWeek", formatDisplayDate(parsedDate));
+    setValue("#calendarWeek", formatDisplayDate(getWeekStartFromIsoDate(parsedDate)));
     loadCalendar().catch((error) => alert(error.message));
   }
 };
 
 const initialiseWeek = () => {
-  const today = new Date();
-  const day = today.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  today.setDate(today.getDate() + diffToMonday);
-  setValue("#calendarWeek", formatDisplayDate(today.toISOString().slice(0, 10)));
+  setValue("#calendarWeek", formatDisplayDate(getWeekStartFromIsoDate(getNzIsoDate())));
 };
 
 const init = () => {
@@ -975,12 +1118,16 @@ const init = () => {
   document.body.addEventListener("click", (event) => {
     const openReportId = event.target.closest("[data-open-report]")?.dataset.openReport;
     const openHazardId = event.target.closest("[data-open-hazard]")?.dataset.openHazard;
+    const submitHazardId = event.target.closest("[data-submit-hazard]")?.dataset.submitHazard;
+    const deleteHazardId = event.target.closest("[data-delete-hazard]")?.dataset.deleteHazard;
     const selectJobNumber = event.target.closest("[data-select-job]")?.dataset.selectJob;
     const deleteFileId = event.target.closest("[data-delete-file]")?.dataset.deleteFile;
     const completeJobButton = event.target.closest("[data-complete-job]");
 
     if (openReportId) openReport(openReportId);
     if (openHazardId) openHazard(openHazardId);
+    if (submitHazardId) submitOpenHazard(submitHazardId).catch((error) => alert(error.message));
+    if (deleteHazardId) deleteOpenHazard(deleteHazardId).catch((error) => alert(error.message));
     if (selectJobNumber) selectJob(selectJobNumber).catch((error) => alert(error.message));
     if (deleteFileId) deleteJobFile(deleteFileId).catch((error) => alert(error.message));
     if (event.target.closest("#toggleCompletedJobs")) toggleCompletedJobs();
