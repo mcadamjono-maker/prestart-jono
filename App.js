@@ -2797,9 +2797,20 @@ export default function App() {
 
   const confirmEmailSubmit = (reportName) =>
     new Promise((resolve) => {
+      const message = `Are you sure you want to submit this ${reportName}? The form will reset after it sends.`;
+
+      if (
+        IS_WEB &&
+        typeof window !== "undefined" &&
+        typeof window.confirm === "function"
+      ) {
+        resolve(window.confirm(`Send Email?\n\n${message}`));
+        return;
+      }
+
       Alert.alert(
         "Send Email?",
-        `Are you sure you want to submit this ${reportName}? The form will reset after it sends.`,
+        message,
         [
           {
             text: "Cancel",
