@@ -2159,13 +2159,21 @@ export default function App() {
 
   const answersText = useMemo(
     () =>
-      answersSummary
-        .map(
-          (answer) =>
-            `${answer.section} - ${answer.item}: ${answer.result}`
-        )
-        .join("\n"),
-    [answersSummary]
+      checklist
+        .map((section) => {
+          const sectionAnswers = answersSummary.filter(
+            (answer) => answer.section === section.title
+          );
+
+          return [
+            section.title,
+            ...sectionAnswers.map(
+              (answer) => `  ${answer.item}: ${answer.result}`
+            ),
+          ].join("\n");
+        })
+        .join("\n\n"),
+    [answersSummary, checklist]
   );
 
   useEffect(() => {
