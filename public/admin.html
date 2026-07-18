@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111111" />
     <title>WDL Office Dashboard</title>
     <link rel="icon" href="/favicon.ico" />
-    <link rel="stylesheet" href="/admin.css?v=20260717-2" />
+    <link rel="stylesheet" href="/admin.css?v=20260718-1" />
   </head>
   <body>
     <header class="topbar">
@@ -23,6 +23,7 @@
         />
         <button id="saveAccessCode" type="button">Save</button>
         <button id="refreshDashboard" type="button">Refresh</button>
+        <button id="toggleBossMode" class="subtle-button" type="button">Simple View</button>
       </div>
     </header>
 
@@ -51,6 +52,7 @@
         <button data-tab="openHazards" type="button">Open Hazard IDs</button>
         <button data-tab="calendar" type="button">Calendar</button>
         <button data-tab="jobs" type="button">Jobs & Files</button>
+        <button data-tab="settings" type="button">Settings</button>
       </nav>
 
       <section id="reports" class="panel active">
@@ -129,6 +131,8 @@
               <button id="saveJobInfo" type="button">Save Job Info</button>
             </div>
 
+            <div id="jobShortcuts" class="job-shortcuts"></div>
+
             <div class="job-info-grid">
               <label>
                 Job Notes
@@ -180,6 +184,55 @@
           </section>
         </div>
       </section>
+
+      <section id="settings" class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Settings</h2>
+            <p>Adjust field app options without changing the app code.</p>
+          </div>
+          <button id="saveSettings" type="button">Save Settings</button>
+        </div>
+
+        <div class="settings-grid">
+          <label>
+            Receiving Emails
+            <textarea id="settingRecipientEmails" placeholder="One email per line"></textarea>
+          </label>
+          <label>
+            Expiry Warning Days
+            <input id="settingExpiryWarningDays" type="number" min="1" max="120" />
+          </label>
+          <label class="checkbox-setting">
+            <input id="settingBossMode" type="checkbox" />
+            Simple field menu by default
+          </label>
+          <label>
+            Truck / Ute Checklist
+            <textarea id="settingTruckChecklist" class="template-textarea"></textarea>
+          </label>
+          <label>
+            Digger / Machinery Checklist
+            <textarea id="settingDiggerChecklist" class="template-textarea"></textarea>
+          </label>
+          <label>
+            Trailer Checklist
+            <textarea id="settingTrailerChecklist" class="template-textarea"></textarea>
+          </label>
+          <label>
+            Hazard Yard Checks
+            <textarea id="settingHazardYardChecks" placeholder="One check per line"></textarea>
+          </label>
+          <label>
+            Hazard Site Checks
+            <textarea id="settingHazardSiteChecks" placeholder="One check per line"></textarea>
+          </label>
+          <label>
+            Hazard Controls
+            <textarea id="settingHazardControls" placeholder="One control per line"></textarea>
+          </label>
+        </div>
+      </section>
     </main>
 
     <aside id="reportDrawer" class="drawer" aria-hidden="true">
@@ -193,6 +246,6 @@
       <div class="empty">Nothing to show yet.</div>
     </template>
 
-    <script src="/admin.js?v=20260717-1" defer></script>
+    <script src="/admin.js?v=20260718-1" defer></script>
   </body>
 </html>

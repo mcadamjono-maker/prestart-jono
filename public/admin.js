@@ -3,7 +3,10 @@ const DASHBOARD_ENDPOINT =
 const JOB_INFO_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const ACCESS_CODE_KEY = "wdl-dashboard-access-code";
+const BOSS_MODE_KEY = "wdl-dashboard-boss-mode";
+const WEB_APP_URL = "https://wdl-field-forms.web.app";
 const CALENDAR_REFRESH_MS = 10000;
+const REPORT_STATUSES = ["New", "Reviewed", "Needs Action", "Filed"];
 let calendarRefreshTimer = null;
 
 const state = {
@@ -12,10 +15,12 @@ const state = {
   hazardReports: [],
   jobs: [],
   calendarEntries: [],
+  appConfig: null,
   selectedReport: null,
   selectedJobNumber: "",
   selectedJobInfo: null,
   showCompletedJobs: false,
+  bossMode: localStorage.getItem(BOSS_MODE_KEY) === "1",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -161,6 +166,71 @@ const jobInfoFetch = (path = "", options = {}) =>
   apiFetch(JOB_INFO_ENDPOINT, path, options);
 
 const emptyHtml = () => $("#emptyTemplate").innerHTML;
+
+const linesToList = (value) =>
+  String(value || "")
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const listToLines = (items = []) => (Array.isArray(items) ? items.join("\n") : "");
+
+const sectionsToText = (sections = []) =>
+  (Array.isArray(sections) ? sections : [])
+    .map((section) => {
+      const title = String(section?.title || "").trim();
+      const items = Array.isArray(section?.items) ? section.items : [];
+
+      return [title, ...items.map((item) => `- ${item}`)].filter(Boolean).join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+const textToSections = (value) => {
+  const sections = [];
+  let currentSection = null;
+
+  String(value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .forEach((line) => {
+      if (!line) {
+        currentSection = null;
+        return;
+      }
+
+      if (!line.startsWith("-")) {
+        currentSection = { title: line, items: [] };
+        sections.push(currentSection);
+        return;
+      }
+
+      if (!currentSection) {
+        currentSection = { title: "Checklist", items: [] };
+        sections.push(currentSection);
+      }
+
+      const item = line.replace(/^-+\s*/, "").trim();
+      if (item) currentSection.items.push(item);
+    });
+
+  return sections.filter((section) => section.title && section.items.length);
+};
+
+const jobActionUrl = (jobNumber, action = "today") => {
+  const params = new URLSearchParams({ job: jobNumber, action });
+
+  return `${WEB_APP_URL}/?${params.toString()}`;
+};
+
+const dashboardUrl = (params) => {
+  const query = new URLSearchParams(params);
+  const accessCode = getAccessCode();
+
+  if (accessCode) query.set("accessCode", accessCode);
+
+  return `${DASHBOARD_ENDPOINT}?${query.toString()}`;
+};
 
 const reportMeta = (report) =>
   [
@@ -331,6 +401,27 @@ const renderMetrics = () => {
   setText("#chargeUpCount", state.chargeUpReports.length);
   setText("#hazardCount", openHazards.length);
   setText("#jobCount", state.jobs.filter((job) => !job.completed).length);
+};
+
+const applyBossMode = () => {
+  document.body.classList.toggle("boss-mode", state.bossMode);
+  setText("#toggleBossMode", state.bossMode ? "Full View" : "Simple View");
+};
+
+const renderSettings = () => {
+  const config = state.appConfig || {};
+  const templates = config.checklistTemplates || {};
+
+  setValue("#settingRecipientEmails", listToLines(config.recipientEmails || []));
+  setValue("#settingExpiryWarningDays", config.expiryWarningDays || 30);
+  const bossModeInput = $("#settingBossMode");
+  if (bossModeInput) bossModeInput.checked = Boolean(config.bossModeEnabled);
+  setValue("#settingTruckChecklist", sectionsToText(templates.truck || []));
+  setValue("#settingDiggerChecklist", sectionsToText(templates.digger || []));
+  setValue("#settingTrailerChecklist", sectionsToText(templates.trailer || []));
+  setValue("#settingHazardYardChecks", listToLines(config.hazardYardChecks || []));
+  setValue("#settingHazardSiteChecks", listToLines(config.hazardSiteChecks || []));
+  setValue("#settingHazardControls", listToLines(config.hazardControls || []));
 };
 
 const renderReports = () => {
@@ -524,6 +615,50 @@ const renderSelectedJobInfo = () => {
       : "Choose a job to manage notes and files."
   );
 
+  setHtml(
+    "#jobShortcuts",
+    selectedJob
+      ? `
+        <article class="shortcut-card">
+          <h4>Job Pack</h4>
+          <p>Print or save all job info, files, reports, and open Hazard IDs.</p>
+          <div class="shortcut-actions">
+            <a class="job-pack-button" href="${escapeHtml(
+              dashboardUrl({ resource: "jobPack", jobNumber: selectedJob.number })
+            )}" target="_blank" rel="noreferrer">Open Job Pack</a>
+          </div>
+        </article>
+        ${[
+          ["hazard", "Hazard ID"],
+          ["chargeup", "Charge Up"],
+          ["jobinfo", "Job Info"],
+          ["asbuilt", "As-Built"],
+        ]
+          .map(
+            ([action, label]) => `
+            <article class="shortcut-card">
+              <h4>${escapeHtml(label)}</h4>
+              <img src="${escapeHtml(
+                dashboardUrl({
+                  resource: "jobQr",
+                  jobNumber: selectedJob.number,
+                  action,
+                })
+              )}" alt="${escapeHtml(label)} QR code" />
+              <div class="shortcut-actions">
+                <a href="${escapeHtml(
+                  jobActionUrl(selectedJob.number, action)
+                )}" target="_blank" rel="noreferrer">Open Link</a>
+                <button type="button" data-copy-link="${escapeHtml(
+                  jobActionUrl(selectedJob.number, action)
+                )}">Copy</button>
+              </div>
+            </article>`
+          )
+          .join("")}`
+      : ""
+  );
+
   setValue("#jobNotes", jobInfo.notes || "");
   setValue("#serviceLocationInfo", jobInfo.serviceLocationInfo || "");
   setValue("#trafficManagementPlan", jobInfo.trafficManagementPlan || "");
@@ -598,6 +733,82 @@ const saveSelectedJobInfo = async () => {
 
   state.selectedJobInfo = payload.job || null;
   renderSelectedJobInfo();
+};
+
+const saveSettings = async () => {
+  const config = {
+    recipientEmails: linesToList($("#settingRecipientEmails").value),
+    expiryWarningDays: Number($("#settingExpiryWarningDays").value || 30),
+    bossModeEnabled: Boolean($("#settingBossMode").checked),
+    checklistTemplates: {
+      truck: textToSections($("#settingTruckChecklist").value),
+      digger: textToSections($("#settingDiggerChecklist").value),
+      trailer: textToSections($("#settingTrailerChecklist").value),
+    },
+    hazardYardChecks: linesToList($("#settingHazardYardChecks").value),
+    hazardSiteChecks: linesToList($("#settingHazardSiteChecks").value),
+    hazardControls: linesToList($("#settingHazardControls").value),
+  };
+  const payload = await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "updateSettings",
+      config,
+    }),
+  });
+
+  state.appConfig = payload.config || state.appConfig;
+  renderSettings();
+  alert("Settings saved.");
+};
+
+const saveReportWorkflow = async () => {
+  if (!state.selectedReport) return;
+
+  const payload = await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "updateReportStatus",
+      reportId: state.selectedReport.id,
+      status: $("#reportWorkflowStatus").value,
+      adminNote: $("#reportWorkflowNote").value,
+    }),
+  });
+  const updatedReport = payload.report;
+
+  if (!updatedReport) return;
+
+  state.selectedReport = updatedReport;
+  state.reports = [
+    updatedReport,
+    ...state.reports.filter((report) => report.id !== updatedReport.id),
+  ].sort((a, b) =>
+    String(b.submittedAtIso || "").localeCompare(String(a.submittedAtIso || ""))
+  );
+  state.chargeUpReports = state.reports.filter(
+    (report) => report.reportType === "Charge Up Job Record"
+  );
+  state.hazardReports = [
+    ...state.hazardReports.filter(
+      (report) => report.id !== updatedReport.id || isOpenHazard(report)
+    ),
+    ...(updatedReport.reportType === "Hazard ID" ? [updatedReport] : []),
+  ];
+  renderReports();
+  renderMetrics();
+  openReportObject(updatedReport);
+};
+
+const copyLink = async (link) => {
+  if (!link) return;
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(link);
+    alert("Link copied.");
+    return;
+  }
+
+  window.prompt("Copy this link", link);
 };
 
 const fileToBase64 = (file) =>
@@ -838,6 +1049,26 @@ const openReportObject = (report) => {
         <p>${reportMeta(report)}</p>
       </header>
       ${reportSummaryHtml(report)}
+      <section class="report-workflow">
+        <label>
+          Review Status
+          <select id="reportWorkflowStatus">
+            ${REPORT_STATUSES.map(
+              (status) =>
+                `<option value="${escapeHtml(status)}" ${
+                  (report.status || "New") === status ? "selected" : ""
+                }>${escapeHtml(status)}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label>
+          Admin Note
+          <textarea id="reportWorkflowNote" placeholder="Optional filing note or follow-up...">${escapeHtml(
+            report.adminNote || ""
+          )}</textarea>
+        </label>
+        <button type="button" id="saveReportWorkflow">Save Review Status</button>
+      </section>
       <h3>Report Details</h3>
       <table class="detail-table">${detailRows(report) || "<tr><td>No extra fields supplied.</td></tr>"}</table>
       ${signatureSectionsHtml(report)}
@@ -876,6 +1107,7 @@ const loadSummary = async () => {
   state.chargeUpReports = payload.chargeUpReports || [];
   state.hazardReports = payload.hazardReports || [];
   state.jobs = payload.jobs || [];
+  state.appConfig = payload.appConfig || state.appConfig;
 
   if (
     state.selectedJobNumber &&
@@ -891,6 +1123,7 @@ const loadSummary = async () => {
   renderOpenHazards();
   renderJobs();
   renderSelectedJobInfo();
+  renderSettings();
 };
 
 const loadCalendar = async ({ silent = false } = {}) => {
@@ -1057,6 +1290,7 @@ const init = () => {
   setValue("#accessCode", getAccessCode());
   initialiseWeek();
   renderSelectedJobInfo();
+  applyBossMode();
 
   $("#saveAccessCode").addEventListener("click", () => {
     localStorage.setItem(ACCESS_CODE_KEY, $("#accessCode").value.trim());
@@ -1065,6 +1299,14 @@ const init = () => {
 
   $("#refreshDashboard").addEventListener("click", () =>
     loadSummary().then(loadCalendar).catch((error) => alert(error.message))
+  );
+  $("#toggleBossMode").addEventListener("click", () => {
+    state.bossMode = !state.bossMode;
+    localStorage.setItem(BOSS_MODE_KEY, state.bossMode ? "1" : "0");
+    applyBossMode();
+  });
+  $("#saveSettings").addEventListener("click", () =>
+    saveSettings().catch((error) => alert(error.message))
   );
   $("#reportSearch").addEventListener("input", renderReports);
   $("#reportTypeFilter").addEventListener("change", renderReports);
@@ -1123,6 +1365,7 @@ const init = () => {
     const selectJobNumber = event.target.closest("[data-select-job]")?.dataset.selectJob;
     const deleteFileId = event.target.closest("[data-delete-file]")?.dataset.deleteFile;
     const completeJobButton = event.target.closest("[data-complete-job]");
+    const copyLinkButton = event.target.closest("[data-copy-link]");
 
     if (openReportId) openReport(openReportId);
     if (openHazardId) openHazard(openHazardId);
@@ -1130,6 +1373,7 @@ const init = () => {
     if (deleteHazardId) deleteOpenHazard(deleteHazardId).catch((error) => alert(error.message));
     if (selectJobNumber) selectJob(selectJobNumber).catch((error) => alert(error.message));
     if (deleteFileId) deleteJobFile(deleteFileId).catch((error) => alert(error.message));
+    if (copyLinkButton) copyLink(copyLinkButton.dataset.copyLink).catch((error) => alert(error.message));
     if (event.target.closest("#toggleCompletedJobs")) toggleCompletedJobs();
     if (completeJobButton) {
       const jobNumber = completeJobButton.dataset.completeJob;
@@ -1164,6 +1408,10 @@ const init = () => {
       }.html`;
       link.click();
       URL.revokeObjectURL(url);
+    }
+
+    if (event.target.id === "saveReportWorkflow" && state.selectedReport) {
+      saveReportWorkflow().catch((error) => alert(error.message));
     }
   });
 

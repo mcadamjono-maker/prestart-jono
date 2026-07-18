@@ -216,8 +216,15 @@ const DEFAULT_FIREBASE_JOB_INFO_ENDPOINT =
 const FIREBASE_JOB_INFO_ENDPOINT =
   process.env.EXPO_PUBLIC_FIREBASE_JOB_INFO_ENDPOINT ||
   DEFAULT_FIREBASE_JOB_INFO_ENDPOINT;
+const DEFAULT_FIREBASE_APP_CONFIG_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/appConfig";
+const FIREBASE_APP_CONFIG_ENDPOINT =
+  process.env.EXPO_PUBLIC_FIREBASE_APP_CONFIG_ENDPOINT ||
+  DEFAULT_FIREBASE_APP_CONFIG_ENDPOINT;
 const MAX_REPORT_ATTACHMENT_BYTES = 28 * 1024 * 1024;
 const SETTINGS_STORAGE_KEY = "williams-field-forms-settings";
+const APP_CONFIG_STORAGE_KEY = "williams-field-forms-app-config";
+const OFFLINE_QUEUE_STORAGE_KEY = "williams-field-forms-outbox";
 const PRESTART_STORAGE_PREFIX = "williams-prestart-values";
 const JOB_STORAGE_KEY = "williams-purchase-order-jobs";
 const DEFAULT_JOB_LIST_URL =
@@ -456,6 +463,85 @@ const mergeJobOptions = (...jobSets) => {
   return normalizeJobOptions(Array.from(jobMap.values()));
 };
 
+const normalizeStringList = (value, fallback = []) => {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(/\n|,/)
+        .map((item) => item.trim());
+  const list = source
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  return list.length > 0 ? [...new Set(list)] : fallback;
+};
+
+const normalizeChecklistTemplates = (templates) => {
+  const source =
+    templates && typeof templates === "object" ? templates : CHECKLIST_TEMPLATES;
+  const output = {};
+
+  TEMPLATE_TABS.forEach((tab) => {
+    const sections = Array.isArray(source[tab.key])
+      ? source[tab.key]
+      : CHECKLIST_TEMPLATES[tab.key];
+
+    output[tab.key] = sections
+      .map((section) => ({
+        title: String(section?.title || "").trim(),
+        items: normalizeStringList(section?.items, []),
+      }))
+      .filter((section) => section.title && section.items.length);
+
+    if (!output[tab.key].length) {
+      output[tab.key] = CHECKLIST_TEMPLATES[tab.key];
+    }
+  });
+
+  return output;
+};
+
+const normalizeAppConfig = (config) => {
+  if (!config || typeof config !== "object") return null;
+
+  const recipientEmails = normalizeStringList(
+    config.recipientEmails,
+    RECIPIENT_EMAIL_OPTIONS
+  ).filter((email) => isValidEmailAddress(email) && isAllowedRecipientEmail(email));
+
+  return {
+    recipientEmails: recipientEmails.length
+      ? recipientEmails
+      : RECIPIENT_EMAIL_OPTIONS,
+    defaultRecipientEmail:
+      recipientEmails.find(
+        (email) =>
+          email.toLowerCase() ===
+          normalizeEmailAddress(config.defaultRecipientEmail).toLowerCase()
+      ) ||
+      recipientEmails[0] ||
+      DEFAULT_EMAIL_RECIPIENT,
+    expiryWarningDays: Math.max(
+      1,
+      Math.min(120, Number(config.expiryWarningDays || 30))
+    ),
+    bossModeEnabled: Boolean(config.bossModeEnabled),
+    checklistTemplates: normalizeChecklistTemplates(config.checklistTemplates),
+    hazardYardChecks: normalizeStringList(
+      config.hazardYardChecks,
+      HAZARD_YARD_CHECKS
+    ),
+    hazardSiteChecks: normalizeStringList(
+      config.hazardSiteChecks,
+      HAZARD_SITE_CHECKS
+    ),
+    hazardControls: normalizeStringList(
+      config.hazardControls,
+      HAZARD_CONTROL_OPTIONS
+    ),
+  };
+};
+
 const normalizeEmailAddress = (value) => String(value || "").trim();
 
 const isValidEmailAddress = (value) =>
@@ -483,6 +569,59 @@ const getTodayDisplayDate = () =>
     month: "2-digit",
     year: "numeric",
   });
+
+const parseDisplayDateValue = (value) => {
+  const cleanedValue = String(value || "").trim();
+  const displayMatch = cleanedValue.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  const isoMatch = cleanedValue.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+
+  if (displayMatch) {
+    const [, day, month, year] = displayMatch;
+    const fullYear = Number(year.length === 2 ? `20${year}` : year);
+    const parsedDate = new Date(
+      Date.UTC(fullYear, Number(month) - 1, Number(day))
+    );
+
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+  }
+
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    const parsedDate = new Date(
+      Date.UTC(Number(year), Number(month) - 1, Number(day))
+    );
+
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+  }
+
+  return null;
+};
+
+const getDateWarningMessage = (label, value, warningDays = 30) => {
+  const parsedDate = parseDisplayDateValue(value);
+
+  if (!parsedDate) return "";
+
+  const today = parseDisplayDateValue(getTodayDisplayDate());
+  const dayMs = 24 * 60 * 60 * 1000;
+  const daysUntilExpiry = Math.ceil(
+    (parsedDate.getTime() - today.getTime()) / dayMs
+  );
+
+  if (daysUntilExpiry < 0) {
+    return `${label} expired ${Math.abs(daysUntilExpiry)} day${
+      Math.abs(daysUntilExpiry) === 1 ? "" : "s"
+    } ago.`;
+  }
+
+  if (daysUntilExpiry <= warningDays) {
+    return `${label} expires in ${daysUntilExpiry} day${
+      daysUntilExpiry === 1 ? "" : "s"
+    }.`;
+  }
+
+  return "";
+};
 
 const getNzIsoDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-NZ", {
@@ -1835,17 +1974,28 @@ const StableLabeledInput = ({ label, style, ...inputProps }) => (
   </View>
 );
 
-const StablePhotoPreviewList = ({ photoList }) => {
+const StablePhotoPreviewList = ({ photoList, onChangeCaption }) => {
   if (photoList.length === 0) return null;
 
   return (
     <View style={styles.photoPreviewGrid}>
       {photoList.map((capturedPhoto, index) => (
-        <Image
-          key={`${capturedPhoto.uri}-${index}`}
-          source={{ uri: capturedPhoto.uri }}
-          style={styles.photoPreviewThumb}
-        />
+        <View key={`${capturedPhoto.uri}-${index}`} style={styles.photoPreviewItem}>
+          <Image
+            source={{ uri: capturedPhoto.uri }}
+            style={styles.photoPreviewThumb}
+          />
+          {!!onChangeCaption && (
+            <DraftTextInput
+              placeholder="Photo caption..."
+              placeholderTextColor="#8a8a8a"
+              style={[styles.input, styles.photoCaptionInput]}
+              value={capturedPhoto.caption || ""}
+              onChangeText={(caption) => onChangeCaption(index, caption)}
+              commitOnChange
+            />
+          )}
+        </View>
       ))}
     </View>
   );
@@ -1925,6 +2075,8 @@ const StableCheckRow = ({
 export default function App() {
   const windowDimensions = useWindowDimensions();
   const [activePage, setActivePage] = useState("menu");
+  const [appConfig, setAppConfig] = useState(null);
+  const [queuedReportCount, setQueuedReportCount] = useState(0);
   const [recipientEmail, setRecipientEmail] = useState(DEFAULT_EMAIL_RECIPIENT);
   const [settingsRecipientEmail, setSettingsRecipientEmail] =
     useState(DEFAULT_EMAIL_RECIPIENT);
@@ -1957,6 +2109,8 @@ export default function App() {
   const [poSupplier, setPoSupplier] = useState("");
   const [poDetails, setPoDetails] = useState("");
   const [jobOptions, setJobOptions] = useState(DEFAULT_JOB_OPTIONS);
+  const [selectedTodayJob, setSelectedTodayJob] = useState("");
+  const [isTodayJobDropdownOpen, setIsTodayJobDropdownOpen] = useState(false);
   const [selectedPurchaseJob, setSelectedPurchaseJob] = useState("");
   const [isPurchaseJobDropdownOpen, setIsPurchaseJobDropdownOpen] =
     useState(false);
@@ -2130,11 +2284,54 @@ export default function App() {
     };
   }, []);
 
-  const checklist = CHECKLIST_TEMPLATES[selectedTemplate];
+  const activeChecklistTemplates =
+    appConfig?.checklistTemplates || CHECKLIST_TEMPLATES;
+  const checklist =
+    activeChecklistTemplates[selectedTemplate] ||
+    CHECKLIST_TEMPLATES[selectedTemplate];
+  const recipientEmailOptions =
+    appConfig?.recipientEmails?.length > 0
+      ? appConfig.recipientEmails
+      : RECIPIENT_EMAIL_OPTIONS;
+  const hazardYardCheckOptions =
+    appConfig?.hazardYardChecks?.length > 0
+      ? appConfig.hazardYardChecks
+      : HAZARD_YARD_CHECKS;
+  const hazardSiteCheckOptions =
+    appConfig?.hazardSiteChecks?.length > 0
+      ? appConfig.hazardSiteChecks
+      : HAZARD_SITE_CHECKS;
+  const hazardControlOptions =
+    appConfig?.hazardControls?.length > 0
+      ? appConfig.hazardControls
+      : HAZARD_CONTROL_OPTIONS;
   const machineFieldLabel =
     MACHINE_FIELD_LABELS[selectedTemplate] || "Machine ID / Rego";
   const activeRecipientEmail =
     normalizeEmailAddress(recipientEmail) || DEFAULT_EMAIL_RECIPIENT;
+  const selectedTodayJobOption = jobOptions.find(
+    (job) => job.number === selectedTodayJob
+  );
+  const prestartExpiryWarnings = useMemo(() => {
+    const warningDays = appConfig?.expiryWarningDays || 30;
+    const dateFields =
+      selectedTemplate === "truck"
+        ? [
+            ["WOF / COF", wofExpiry],
+            ["Registration", regoExpiry],
+            ["RUC", rucExpiry],
+          ]
+        : selectedTemplate === "trailer"
+          ? [
+              ["Trailer registration", regoExpiry],
+              ["Trailer WOF", wofExpiry],
+            ]
+          : [];
+
+    return dateFields
+      .map(([label, value]) => getDateWarningMessage(label, value, warningDays))
+      .filter(Boolean);
+  }, [appConfig, selectedTemplate, wofExpiry, regoExpiry, rucExpiry]);
   const selectedPurchaseJobOption = jobOptions.find(
     (job) => job.number === selectedPurchaseJob
   );
@@ -2197,6 +2394,109 @@ export default function App() {
         .join("\n\n"),
     [answersSummary, checklist]
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAppConfig = async () => {
+      try {
+        const cachedConfig = await AsyncStorage.getItem(APP_CONFIG_STORAGE_KEY);
+
+        if (cachedConfig && isMounted) {
+          setAppConfig(normalizeAppConfig(JSON.parse(cachedConfig)));
+        }
+
+        const response = await fetchWithTimeout(
+          FIREBASE_APP_CONFIG_ENDPOINT,
+          {},
+          12000,
+          "Loading app settings timed out."
+        );
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Unable to load app settings.");
+        }
+
+        const normalizedConfig = normalizeAppConfig(payload.config);
+
+        if (normalizedConfig && isMounted) {
+          setAppConfig(normalizedConfig);
+          await AsyncStorage.setItem(
+            APP_CONFIG_STORAGE_KEY,
+            JSON.stringify(normalizedConfig)
+          );
+
+          if (
+            normalizedConfig.defaultRecipientEmail &&
+            !recipientEmail
+          ) {
+            setRecipientEmail(normalizedConfig.defaultRecipientEmail);
+            setSettingsRecipientEmail(normalizedConfig.defaultRecipientEmail);
+          }
+        }
+      } catch (error) {
+        console.warn("Unable to load app config", error);
+      }
+    };
+
+    loadAppConfig();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadOutboxCount = async () => {
+      try {
+        const queuedReports = JSON.parse(
+          (await AsyncStorage.getItem(OFFLINE_QUEUE_STORAGE_KEY)) || "[]"
+        );
+
+        if (isMounted) {
+          setQueuedReportCount(Array.isArray(queuedReports) ? queuedReports.length : 0);
+        }
+      } catch {
+        if (isMounted) setQueuedReportCount(0);
+      }
+    };
+
+    loadOutboxCount();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!IS_WEB || typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search || "");
+    const jobNumber = formatJobNumber(params.get("job"));
+    const action = String(params.get("action") || "").toLowerCase();
+    const pageMap = {
+      hazard: "hazard",
+      chargeup: "chargeup",
+      charge: "chargeup",
+      jobinfo: "jobinfo",
+      asbuilt: "asbuilt",
+      prestart: "prestart",
+      incident: "incident",
+    };
+    const nextPage = pageMap[action] || "menu";
+
+    if (jobNumber) {
+      setSelectedTodayJob(jobNumber);
+      setSelectedHazardJob(jobNumber);
+      setSelectedChargeJob(jobNumber);
+      setSelectedInfoJob(jobNumber);
+    }
+
+    setActivePage(nextPage);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -2692,6 +2992,14 @@ export default function App() {
     }
   };
 
+  const updatePhotoCaption = (setPhotoList, index, caption) => {
+    setPhotoList((currentPhotos) =>
+      currentPhotos.map((photo, photoIndex) =>
+        photoIndex === index ? { ...photo, caption } : photo
+      )
+    );
+  };
+
   const resetForm = () => {
     setAnswers({});
     setNotes("");
@@ -3033,6 +3341,103 @@ export default function App() {
     }
   };
 
+  const getQueuedReports = async () => {
+    try {
+      const queuedReports = JSON.parse(
+        (await AsyncStorage.getItem(OFFLINE_QUEUE_STORAGE_KEY)) || "[]"
+      );
+
+      return Array.isArray(queuedReports) ? queuedReports : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveQueuedReports = async (queuedReports) => {
+    await AsyncStorage.setItem(
+      OFFLINE_QUEUE_STORAGE_KEY,
+      JSON.stringify(queuedReports)
+    );
+    setQueuedReportCount(queuedReports.length);
+  };
+
+  const queueReportRequest = async (requestBody) => {
+    const queuedReports = await getQueuedReports();
+    const queuedRequest = {
+      id: `${Date.now()}-${queuedReports.length}`,
+      queuedAt: getSubmittedAt(),
+      requestBody,
+    };
+    const serializedRequest = JSON.stringify(queuedRequest);
+
+    if (serializedRequest.length > 5 * 1024 * 1024) {
+      throw new Error(
+        "The report could not send and is too large to save offline. Please try again with fewer photos."
+      );
+    }
+
+    await saveQueuedReports([...queuedReports, queuedRequest].slice(-20));
+
+    return "queued";
+  };
+
+  const sendReportRequest = async (requestBody) => {
+    const response = await fetchWithTimeout(
+      FIREBASE_REPORT_ENDPOINT.trim(),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      },
+      REPORT_SEND_TIMEOUT_MS,
+      "Sending the report timed out. Please check reception and try again."
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(
+        errorBody.error || `Report email failed with status ${response.status}.`
+      );
+    }
+
+    return "sent";
+  };
+
+  const processQueuedReports = async ({ showAlert = true } = {}) => {
+    const queuedReports = await getQueuedReports();
+
+    if (queuedReports.length === 0) {
+      if (showAlert) Alert.alert("Outbox Empty", "There are no saved reports to send.");
+      return;
+    }
+
+    const stillQueued = [];
+    let sentCount = 0;
+
+    for (const queuedReport of queuedReports) {
+      try {
+        await sendReportRequest(queuedReport.requestBody);
+        sentCount += 1;
+      } catch (error) {
+        console.warn("Queued report send failed", error);
+        stillQueued.push(queuedReport);
+      }
+    }
+
+    await saveQueuedReports(stillQueued);
+
+    if (showAlert) {
+      Alert.alert(
+        "Outbox Updated",
+        sentCount > 0
+          ? `${sentCount} saved report${sentCount === 1 ? "" : "s"} sent. ${stillQueued.length} still waiting.`
+          : "Saved reports could not send yet. Try again when reception is better."
+      );
+    }
+  };
+
   const sendFirebaseReport = async ({
     reportType,
     subject,
@@ -3053,35 +3458,27 @@ export default function App() {
       photoList,
       photoFilenamePrefix
     );
-    const response = await fetchWithTimeout(
-      endpoint,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          recipientEmail: activeRecipientEmail,
-          reportType,
-          subject,
-          message,
-          fields,
-          formData,
-          attachments: [...attachments, ...extraAttachments],
-        }),
-      },
-      REPORT_SEND_TIMEOUT_MS,
-      "Sending the report timed out. Please check reception and try again."
-    );
+    const requestBody = {
+      recipientEmail: activeRecipientEmail,
+      reportType,
+      subject,
+      message,
+      fields,
+      formData,
+      attachments: [...attachments, ...extraAttachments],
+    };
 
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      throw new Error(
-        errorBody.error || `Report email failed with status ${response.status}.`
-      );
+    try {
+      return await sendReportRequest(requestBody);
+    } catch (error) {
+      const isServerError = /status\s(4\d\d|5\d\d)/i.test(error.message || "");
+
+      if (isServerError) {
+        throw error;
+      }
+
+      return queueReportRequest(requestBody);
     }
-
-    return true;
   };
 
   const buildHazardDraftPayload = () => ({
@@ -3460,8 +3857,11 @@ export default function App() {
           capturedPhoto.uri?.split("/").pop() ||
           `photo-${index + 1}.jpg`;
         const photoType = capturedPhoto.mimeType || "image/jpeg";
+        const caption = String(capturedPhoto.caption || "").trim();
 
-        return `${index + 1}. ${photoName} (${photoType})`;
+        return `${index + 1}. ${photoName} (${photoType})${
+          caption ? ` - ${caption}` : ""
+        }`;
       })
       .join("\n");
   };
@@ -3587,6 +3987,11 @@ export default function App() {
       asBuiltBoardSize
     );
   };
+
+  const getDeliverySuccessMessage = (deliveryResult, sentMessage) =>
+    deliveryResult === "queued"
+      ? "No connection or the send timed out. The report was saved to the outbox and can be sent from Settings."
+      : sentMessage;
 
   const getAsBuiltTouchPoints = (event) => {
     const nativeEvent = event.nativeEvent || {};
@@ -4465,7 +4870,13 @@ export default function App() {
       });
 
       if (sentByFirebase) {
-        Alert.alert("Success", "As-Built plan emailed successfully.");
+        Alert.alert(
+          sentByFirebase === "queued" ? "Saved To Outbox" : "Success",
+          getDeliverySuccessMessage(
+            sentByFirebase,
+            "As-Built plan emailed successfully."
+          )
+        );
         resetAsBuiltForm();
         return;
       }
@@ -4575,7 +4986,10 @@ export default function App() {
       });
 
       if (sentByFirebase) {
-        successMessage = "Checklist emailed successfully.";
+        successMessage = getDeliverySuccessMessage(
+          sentByFirebase,
+          "Checklist emailed successfully."
+        );
       } else if (photoAttachments.length > 0) {
         const canCompose = await MailComposer.isAvailableAsync();
 
@@ -4608,7 +5022,10 @@ export default function App() {
         });
       }
 
-      Alert.alert("Success", successMessage);
+      Alert.alert(
+        successMessage.includes("outbox") ? "Saved To Outbox" : "Success",
+        successMessage
+      );
       resetForm();
     } catch (error) {
       Alert.alert("Email Failed", getEmailErrorMessage(error));
@@ -4701,7 +5118,10 @@ export default function App() {
       });
 
       if (sentByFirebase) {
-        successMessage = "Incident report emailed successfully.";
+        successMessage = getDeliverySuccessMessage(
+          sentByFirebase,
+          "Incident report emailed successfully."
+        );
       } else if (incidentPhotoAttachments.length > 0) {
         const canCompose = await MailComposer.isAvailableAsync();
 
@@ -4756,7 +5176,10 @@ export default function App() {
         successMessage = "Incident email opened. Tap send in your email app to finish.";
       }
 
-      Alert.alert("Success", successMessage);
+      Alert.alert(
+        successMessage.includes("outbox") ? "Saved To Outbox" : "Success",
+        successMessage
+      );
       resetIncidentForm();
     } catch (error) {
       Alert.alert("Email Failed", getEmailErrorMessage(error));
@@ -4901,7 +5324,13 @@ export default function App() {
         }
       }
 
-      Alert.alert("Success", "Charge up job record emailed successfully.");
+      Alert.alert(
+        sentByFirebase === "queued" ? "Saved To Outbox" : "Success",
+        getDeliverySuccessMessage(
+          sentByFirebase,
+          "Charge up job record emailed successfully."
+        )
+      );
       resetChargeUpForm();
     } catch (error) {
       Alert.alert("Email Failed", getEmailErrorMessage(error));
@@ -5271,9 +5700,19 @@ export default function App() {
       });
 
       if (sentByFirebase) {
-        await clearSubmittedHazardDraft(hazardDraftPayload);
-        Alert.alert("Success", "Hazard ID emailed successfully.");
-        resetHazardForm();
+        if (sentByFirebase !== "queued") {
+          await clearSubmittedHazardDraft(hazardDraftPayload);
+        }
+        Alert.alert(
+          sentByFirebase === "queued" ? "Saved To Outbox" : "Success",
+          getDeliverySuccessMessage(
+            sentByFirebase,
+            "Hazard ID emailed successfully."
+          )
+        );
+        if (sentByFirebase !== "queued") {
+          resetHazardForm();
+        }
         return;
       }
 
@@ -5719,6 +6158,36 @@ export default function App() {
     );
   };
 
+  const openTodayAction = (pageKey) => {
+    const pagesRequiringJob = ["hazard", "chargeup", "jobinfo", "asbuilt"];
+
+    if (pagesRequiringJob.includes(pageKey) && !selectedTodayJob) {
+      Alert.alert("Select Job", "Choose a job first so the form opens ready.");
+      return;
+    }
+
+    if (pageKey === "hazard") {
+      setSelectedHazardJob(selectedTodayJob);
+      setIsHazardJobDropdownOpen(false);
+    }
+
+    if (pageKey === "chargeup") {
+      setSelectedChargeJob(selectedTodayJob);
+      setIsChargeJobDropdownOpen(false);
+    }
+
+    if (pageKey === "jobinfo") {
+      setSelectedInfoJob(selectedTodayJob);
+      setIsInfoJobDropdownOpen(false);
+    }
+
+    if (pageKey === "asbuilt" && selectedTodayJobOption?.name && !asBuiltAddress) {
+      setAsBuiltAddress(selectedTodayJobOption.name);
+    }
+
+    setActivePage(pageKey);
+  };
+
   return (
     <SafeAreaProvider>
       <ImageBackground
@@ -5753,11 +6222,44 @@ export default function App() {
 
           {activePage === "menu" && (
             <View style={styles.menu}>
+              <View style={styles.todayPanel}>
+                <Text style={styles.todayTitle}>Today</Text>
+                <Text style={styles.todaySubtitle}>
+                  Pick the job once, then open the form you need.
+                </Text>
+                <StableJobSelect
+                  selectedJobNumber={selectedTodayJob}
+                  selectedJobOption={selectedTodayJobOption}
+                  isOpen={isTodayJobDropdownOpen}
+                  setIsOpen={setIsTodayJobDropdownOpen}
+                  onSelectJob={setSelectedTodayJob}
+                  jobOptions={jobOptions}
+                  isSubmitting={isSubmitting}
+                />
+                <View style={styles.todayActionGrid}>
+                  {APP_TABS.map((tab) => (
+                    <Pressable
+                      key={`today-${tab.key}`}
+                      style={[
+                        styles.todayActionButton,
+                        isSubmitting && styles.disabledButton,
+                      ]}
+                      onPress={() => openTodayAction(tab.key)}
+                      disabled={isSubmitting}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.todayActionText}>{tab.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <Text style={styles.menuSectionLabel}>All Forms</Text>
               {APP_TABS.map((tab) => (
                 <Pressable
                   key={tab.key}
                   style={styles.menuButton}
-                  onPress={() => setActivePage(tab.key)}
+                  onPress={() => openTodayAction(tab.key)}
                   disabled={isSubmitting}
                   accessibilityRole="button"
                 >
@@ -5793,6 +6295,10 @@ export default function App() {
                 <Text style={styles.settingsHelpText}>
                   Current receiving email: {activeRecipientEmail}
                 </Text>
+                <Text style={styles.settingsHelpText}>
+                  Outbox: {queuedReportCount} saved report
+                  {queuedReportCount === 1 ? "" : "s"} waiting to send.
+                </Text>
 
                 <View style={styles.labeledInput}>
                   <Text style={styles.inputLabel}>Receiving Email</Text>
@@ -5820,7 +6326,7 @@ export default function App() {
 
                   {isSettingsEmailDropdownOpen && (
                     <View style={styles.settingsDropdownList}>
-                      {RECIPIENT_EMAIL_OPTIONS.map((email) => {
+                      {recipientEmailOptions.map((email) => {
                         const isSelected =
                           normalizeEmailAddress(settingsRecipientEmail).toLowerCase() ===
                           email.toLowerCase();
@@ -5861,6 +6367,21 @@ export default function App() {
                   >
                     <Text style={styles.secondaryButtonText}>
                       RESTORE DEFAULT EMAIL
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.secondaryButton,
+                      (isSubmitting || queuedReportCount === 0) &&
+                        styles.disabledControl,
+                    ]}
+                    onPress={() => processQueuedReports({ showAlert: true })}
+                    disabled={isSubmitting || queuedReportCount === 0}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      SEND SAVED OUTBOX REPORTS
                     </Text>
                   </Pressable>
                 </View>
@@ -6064,6 +6585,16 @@ export default function App() {
                 />
               </>
             )}
+
+            {prestartExpiryWarnings.length > 0 && (
+              <View style={styles.warningPanel}>
+                {prestartExpiryWarnings.map((warning) => (
+                  <Text key={warning} style={styles.warningText}>
+                    {warning}
+                  </Text>
+                ))}
+              </View>
+            )}
           </View>
 
           {checklist.map((section, sectionIndex) => (
@@ -6113,7 +6644,12 @@ export default function App() {
               <Text style={styles.photoText}>Take Fault Photo</Text>
             </Pressable>
 
-            <StablePhotoPreviewList photoList={photos} />
+            <StablePhotoPreviewList
+              photoList={photos}
+              onChangeCaption={(index, caption) =>
+                updatePhotoCaption(setPhotos, index, caption)
+              }
+            />
 
             <Text style={styles.inputLabel}>Fault Notes</Text>
             <DraftTextInput
@@ -6227,7 +6763,12 @@ export default function App() {
                   <Text style={styles.photoText}>Take Incident Photo</Text>
                 </Pressable>
 
-                <StablePhotoPreviewList photoList={incidentPhotos} />
+                <StablePhotoPreviewList
+                  photoList={incidentPhotos}
+                  onChangeCaption={(index, caption) =>
+                    updatePhotoCaption(setIncidentPhotos, index, caption)
+                  }
+                />
               </View>
 
               <Pressable
@@ -6355,7 +6896,12 @@ export default function App() {
                   <Text style={styles.photoText}>Take Charge Up Photo</Text>
                 </Pressable>
 
-                <StablePhotoPreviewList photoList={chargePhotos} />
+                <StablePhotoPreviewList
+                  photoList={chargePhotos}
+                  onChangeCaption={(index, caption) =>
+                    updatePhotoCaption(setChargePhotos, index, caption)
+                  }
+                />
               </View>
 
               <Pressable
@@ -6595,7 +7141,7 @@ export default function App() {
 
                 <Text style={styles.formSectionTitle}>Pre Start at Yard</Text>
                 <View style={styles.optionGrid}>
-                  {HAZARD_YARD_CHECKS.map((item) => {
+                  {hazardYardCheckOptions.map((item) => {
                     const isSelected = !!hazardYardChecks[item];
 
                     return (
@@ -6629,7 +7175,7 @@ export default function App() {
                   Pre Start Checklist At Site
                 </Text>
                 <View style={styles.optionGrid}>
-                  {HAZARD_SITE_CHECKS.map((item) => {
+                  {hazardSiteCheckOptions.map((item) => {
                     const isSelected = !!hazardSiteChecks[item];
 
                     return (
@@ -6673,7 +7219,7 @@ export default function App() {
                   Controls We Have Put In Place
                 </Text>
                 <View style={styles.optionGrid}>
-                  {HAZARD_CONTROL_OPTIONS.map((item) => {
+                  {hazardControlOptions.map((item) => {
                     const isSelected = !!hazardControls[item];
 
                     return (
@@ -7185,6 +7731,60 @@ const styles = StyleSheet.create({
     marginHorizontal: 18,
   },
 
+  todayPanel: {
+    backgroundColor: "rgba(8,8,8,0.82)",
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.32)",
+    gap: 12,
+  },
+
+  todayTitle: {
+    color: "#D7FF2F",
+    fontSize: 25,
+    fontWeight: "900",
+  },
+
+  todaySubtitle: {
+    color: "#d8d8d8",
+    fontSize: 15,
+    lineHeight: 21,
+  },
+
+  todayActionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+
+  todayActionButton: {
+    flexGrow: 1,
+    flexBasis: "45%",
+    minHeight: 48,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 16,
+    backgroundColor: "#D7FF2F",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+
+  todayActionText: {
+    color: "#000",
+    fontSize: 15,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+
+  menuSectionLabel: {
+    color: "#D7FF2F",
+    fontSize: 14,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    marginTop: 8,
+  },
+
   menuButton: {
     backgroundColor: "rgba(8,8,8,0.82)",
     borderRadius: 22,
@@ -7510,12 +8110,42 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
+  photoPreviewItem: {
+    width: 142,
+    gap: 8,
+  },
+
   photoPreviewThumb: {
-    width: 96,
+    width: "100%",
     height: 96,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
+  },
+
+  photoCaptionInput: {
+    minHeight: 42,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+    marginBottom: 0,
+  },
+
+  warningPanel: {
+    backgroundColor: "rgba(215,255,47,0.1)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.3)",
+    padding: 12,
+    marginTop: 2,
+    gap: 6,
+  },
+
+  warningText: {
+    color: "#D7FF2F",
+    fontSize: 14,
+    fontWeight: "800",
   },
 
   notes: {

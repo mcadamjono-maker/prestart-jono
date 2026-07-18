@@ -1,5 +1,6 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const QRCode = require("qrcode");
 
 const MAX_ATTACHMENTS = 8;
 const MAX_BASE64_ATTACHMENT_CHARS = 36 * 1024 * 1024;
@@ -8,11 +9,124 @@ const DEFAULT_TO_EMAIL = "Jonomcadam@hotmail.com";
 const DEFAULT_FROM_EMAIL = "WDL Field Forms <no-reply@maileroo.com>";
 const DEFAULT_SMTP_HOST = "smtp.maileroo.com";
 const DEFAULT_JOB_FILES_BUCKET = "wdl-field-forms-job-files";
+const DEFAULT_WEB_APP_URL = "https://wdl-field-forms.web.app";
 const DEFAULT_JOB_INFO_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
 const ALLOWED_RECIPIENT_EMAILS = [DEFAULT_TO_EMAIL.toLowerCase()];
 const NZ_TIME_ZONE = "Pacific/Auckland";
+const APP_CONFIG_DOC_ID = "field-app";
+const DEFAULT_APP_CONFIG = {
+  recipientEmails: [
+    "Jonomcadam@hotmail.com",
+    "Trish@williamsdrainage.co.nz",
+    "Brad@williamsdrainage.co.nz",
+  ],
+  defaultRecipientEmail: "Jonomcadam@hotmail.com",
+  expiryWarningDays: 30,
+  bossModeEnabled: false,
+  checklistTemplates: {
+    truck: [
+      {
+        title: "Vehicle Checks",
+        items: [
+          "Brake fluid",
+          "Engine oil level",
+          "Radiator fluid",
+          "Battery condition",
+          "Tyres & wheel nuts",
+          "Horn",
+          "Lights",
+          "Pressure leaks",
+          "Fire extinguisher",
+          "Reversing beeper/camera",
+        ],
+      },
+      {
+        title: "Compliance",
+        items: ["Rego current", "WOF / COF current", "Road User Charges current"],
+      },
+    ],
+    digger: [
+      {
+        title: "Digger / Machinery Pre-Start Checks",
+        items: [
+          "No visible damage",
+          "No hydraulic leaks",
+          "Tracks / wheels in good condition",
+          "Bucket / attachment secure",
+          "Pins & bushes greased",
+          "Handrails secure",
+        ],
+      },
+      {
+        title: "Fluid Levels",
+        items: ["Engine oil OK", "Hydraulic oil OK", "Coolant OK", "Fuel sufficient"],
+      },
+      {
+        title: "Cab & Controls",
+        items: [
+          "Seatbelt working",
+          "Horn operational",
+          "Controls responsive",
+          "No warning lights",
+        ],
+      },
+    ],
+    trailer: [
+      {
+        title: "General Condition",
+        items: ["No structural damage", "Deck in good condition", "Ramps secure"],
+      },
+      {
+        title: "Tyres & Wheels",
+        items: ["Tyres inflated", "Wheel nuts secure", "No uneven wear"],
+      },
+      {
+        title: "Lights & Electrical",
+        items: [
+          "Brake lights working",
+          "Indicators working",
+          "Tail lights working",
+          "Plug secure",
+        ],
+      },
+    ],
+  },
+  hazardYardChecks: [
+    "Vehicle visual check and machinery check",
+    "Required PPE worn and in good condition",
+    "Additional safety equipment checked",
+    "Close approach permit if required",
+    "WorkSafe notified for notifiable work",
+    "Equipment and documentation secure",
+    "Underground service plans obtained",
+  ],
+  hazardSiteChecks: [
+    "Everyone on site inducted and signed on",
+    "Traffic management checked",
+    "Machinery pre-start checks complete",
+    "TMP copy to site",
+    "Review site for new hazards or changes",
+    "Induction done for new people onsite",
+    "Hazards specific to this task explained",
+  ],
+  hazardControls: [
+    "Site secured and access restricted",
+    "Public protection in place",
+    "Keep clear of moving machinery",
+    "Trench stability checked",
+    "Utilities marked / service locations checked",
+    "Hand digging where required",
+    "Spotter used where necessary",
+    "Equipment maintained and fit for purpose",
+    "Competent operator",
+    "Additional PPE used where required",
+    "Keep worksite clean and tidy",
+    "Relevant qualifications held",
+    "Adequate supervision provided",
+  ],
+};
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -130,6 +244,135 @@ const formatJob = (doc) => {
     completed: Boolean(data.completed),
     completedAtIso: data.completedAtIso || "",
   };
+};
+
+const normaliseString = (value, maxLength = 500, fallback = "") => {
+  const cleaned = String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim()
+    .slice(0, maxLength);
+
+  return cleaned || fallback;
+};
+
+const normaliseStringList = (value, fallback = [], maxItems = 80) => {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(/\n|,/)
+        .map((item) => item.trim());
+
+  const items = source
+    .map((item) => normaliseString(item, 160))
+    .filter(Boolean)
+    .slice(0, maxItems);
+
+  return items.length ? [...new Set(items)] : fallback;
+};
+
+const normaliseChecklistTemplates = (templates) => {
+  const source =
+    templates && typeof templates === "object"
+      ? templates
+      : DEFAULT_APP_CONFIG.checklistTemplates;
+  const output = {};
+
+  ["truck", "digger", "trailer"].forEach((templateKey) => {
+    const sections = Array.isArray(source[templateKey])
+      ? source[templateKey]
+      : DEFAULT_APP_CONFIG.checklistTemplates[templateKey];
+
+    output[templateKey] = sections
+      .map((section) => ({
+        title: normaliseString(section?.title, 90),
+        items: normaliseStringList(section?.items, [], 40),
+      }))
+      .filter((section) => section.title && section.items.length)
+      .slice(0, 12);
+
+    if (!output[templateKey].length) {
+      output[templateKey] = DEFAULT_APP_CONFIG.checklistTemplates[templateKey];
+    }
+  });
+
+  return output;
+};
+
+const normaliseAppConfig = (value = {}) => {
+  const source = toPlainObject(value);
+  const recipientEmails = normaliseStringList(
+    source.recipientEmails,
+    DEFAULT_APP_CONFIG.recipientEmails,
+    12
+  ).filter((email) => {
+    const lowerEmail = email.toLowerCase();
+    const domain = lowerEmail.split("@").pop();
+
+    return (
+      ALLOWED_RECIPIENT_EMAILS.includes(lowerEmail) ||
+      ALLOWED_RECIPIENT_DOMAINS.includes(domain)
+    );
+  });
+  const safeRecipientEmails = recipientEmails.length
+    ? recipientEmails
+    : DEFAULT_APP_CONFIG.recipientEmails;
+  const defaultRecipientEmail = safeRecipientEmails.includes(
+    source.defaultRecipientEmail
+  )
+    ? source.defaultRecipientEmail
+    : safeRecipientEmails[0];
+  const expiryWarningDays = Math.max(
+    1,
+    Math.min(120, Number(source.expiryWarningDays || DEFAULT_APP_CONFIG.expiryWarningDays))
+  );
+
+  return {
+    recipientEmails: safeRecipientEmails,
+    defaultRecipientEmail,
+    expiryWarningDays,
+    bossModeEnabled: Boolean(source.bossModeEnabled),
+    checklistTemplates: normaliseChecklistTemplates(source.checklistTemplates),
+    hazardYardChecks: normaliseStringList(
+      source.hazardYardChecks,
+      DEFAULT_APP_CONFIG.hazardYardChecks,
+      80
+    ),
+    hazardSiteChecks: normaliseStringList(
+      source.hazardSiteChecks,
+      DEFAULT_APP_CONFIG.hazardSiteChecks,
+      80
+    ),
+    hazardControls: normaliseStringList(
+      source.hazardControls,
+      DEFAULT_APP_CONFIG.hazardControls,
+      120
+    ),
+  };
+};
+
+const getAppConfigRef = () =>
+  getFirestore().collection("settings").doc(APP_CONFIG_DOC_ID);
+
+const getPublicAppConfig = async () => {
+  const doc = await getAppConfigRef().get();
+
+  return normaliseAppConfig({
+    ...DEFAULT_APP_CONFIG,
+    ...(doc.exists ? doc.data() || {} : {}),
+  });
+};
+
+const getWebAppUrl = () =>
+  String(process.env.WEB_APP_URL || DEFAULT_WEB_APP_URL).replace(/\/+$/, "");
+
+const buildJobActionUrl = (jobNumber, action = "today") => {
+  const params = new URLSearchParams({
+    job: normaliseJobNumber(jobNumber),
+    action: String(action || "today"),
+  });
+
+  return `${getWebAppUrl()}/?${params.toString()}`;
 };
 
 const normaliseJobFileCategory = (category) => {
@@ -671,7 +914,7 @@ const getReportStatus = (reportType, fields = {}) => {
     return getStringField(fields, ["status"]) || "Pending";
   }
 
-  return "Filed";
+  return getStringField(fields, ["status"]) || "New";
 };
 
 const getNzIsoDate = (date = new Date()) => {
@@ -1214,6 +1457,166 @@ const publicReport = (doc) => {
   };
 };
 
+const formatNzDateTime = (value) => {
+  const date = value instanceof Date ? value : new Date(String(value || ""));
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  return new Intl.DateTimeFormat("en-NZ", {
+    timeZone: NZ_TIME_ZONE,
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
+
+const dashboardAttachmentUrl = (reportId, attachment, index, accessCode = "") => {
+  const attachmentId = attachment?.id || String(index + 1);
+  const params = new URLSearchParams({
+    resource: "attachment",
+    reportId,
+    attachmentId,
+  });
+
+  if (accessCode) params.set("accessCode", accessCode);
+
+  return `https://australia-southeast1-wdl-field-forms.cloudfunctions.net/dashboard?${params.toString()}`;
+};
+
+const buildJobPackHtml = ({ job, jobInfo, reports, openHazards, accessCode }) => {
+  const jobTitle = `${job?.number || jobInfo?.number || ""} - ${
+    job?.name || jobInfo?.name || "Job"
+  }`;
+  const infoRows = [
+    ["Job Notes", jobInfo?.notes],
+    ["Service Location Information", jobInfo?.serviceLocationInfo],
+    ["Traffic Management Plan", jobInfo?.trafficManagementPlan],
+    ["Purchase Order Numbers", jobInfo?.purchaseOrderNumbers],
+    ["Contacts", jobInfo?.contacts],
+    ["Other Details", jobInfo?.otherDetails],
+  ];
+  const reportRows = reports
+    .map(
+      (report) => `
+        <tr>
+          <td>${escapeHtml(report.reportType)}</td>
+          <td>${escapeHtml(report.subject)}</td>
+          <td>${escapeHtml(formatNzDateTime(report.submittedAtIso))}</td>
+          <td>${escapeHtml(report.status || "Filed")}</td>
+        </tr>`
+    )
+    .join("");
+  const hazardRows = openHazards
+    .map(
+      (hazard) => `
+        <tr>
+          <td>${escapeHtml(hazard.jobName || hazard.jobNumber)}</td>
+          <td>${escapeHtml(hazard.weekStart || "")}</td>
+          <td>${escapeHtml(String((hazard.signOns || []).length))}</td>
+          <td>${escapeHtml(formatNzDateTime(hazard.submittedAtIso))}</td>
+        </tr>`
+    )
+    .join("");
+  const fileRows = (jobInfo?.files || [])
+    .map(
+      (file) => `
+        <tr>
+          <td>${escapeHtml(file.category || "File")}</td>
+          <td>${escapeHtml(file.filename || "Job file")}</td>
+          <td>${escapeHtml(file.notes || "")}</td>
+          <td>${file.url ? `<a href="${escapeHtml(file.url)}">Open</a>` : ""}</td>
+        </tr>`
+    )
+    .join("");
+  const attachmentRows = reports
+    .flatMap((report) =>
+      (report.attachmentSummary || []).map((attachment, index) => ({
+        report,
+        attachment,
+        index,
+      }))
+    )
+    .map(({ report, attachment, index }) => {
+      const url = dashboardAttachmentUrl(report.id, attachment, index, accessCode);
+
+      return `
+        <tr>
+          <td>${escapeHtml(report.reportType)}</td>
+          <td>${escapeHtml(attachment.filename || `Attachment ${index + 1}`)}</td>
+          <td><a href="${escapeHtml(url)}">Open</a></td>
+        </tr>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="en-NZ">
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(jobTitle)} Job Pack</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #f3f5f0; color: #101010; font-family: Arial, sans-serif; }
+      .page { max-width: 980px; margin: 24px auto; background: #fff; border: 1px solid #d9ded4; }
+      header { padding: 26px 30px; background: #050505; color: #fff; border-bottom: 8px solid #d7ff2f; }
+      .eyebrow { margin: 0 0 8px; color: #d7ff2f; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
+      h1 { margin: 0; font-size: 30px; }
+      main { padding: 28px 30px 34px; }
+      h2 { margin: 26px 0 8px; padding: 10px 12px; background: #101010; color: #d7ff2f; font-size: 15px; text-transform: uppercase; border-left: 7px solid #d7ff2f; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+      th, td { border-bottom: 1px solid #e1e5dd; padding: 9px 10px; text-align: left; vertical-align: top; white-space: pre-line; }
+      th { color: #566050; width: 28%; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+      .print-actions { padding: 14px 30px; background: #eef2e9; border-bottom: 1px solid #d9ded4; }
+      button { min-height: 42px; padding: 0 18px; border: 0; border-radius: 8px; background: #d7ff2f; font-weight: 800; cursor: pointer; }
+      @media print {
+        body { background: #fff; }
+        .page { margin: 0; border: 0; max-width: none; }
+        .print-actions { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <p class="eyebrow">Williams Drainage Limited</p>
+        <h1>${escapeHtml(jobTitle)}</h1>
+        <p>Job pack generated ${escapeHtml(formatNzDateTime(new Date()))}</p>
+      </header>
+      <div class="print-actions"><button onclick="window.print()">Print / Save PDF</button></div>
+      <main>
+        <h2>Job Information</h2>
+        <table>${infoRows
+          .map(
+            ([label, value]) =>
+              `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(
+                formatReportValue(value || "Not supplied")
+              )}</td></tr>`
+          )
+          .join("")}</table>
+        <h2>Open Hazard IDs</h2>
+        <table>
+          <tr><th>Job</th><th>Week</th><th>Sign-ons</th><th>Last Saved</th></tr>
+          ${hazardRows || '<tr><td colspan="4">No open Hazard IDs.</td></tr>'}
+        </table>
+        <h2>Filed Reports</h2>
+        <table>
+          <tr><th>Type</th><th>Subject</th><th>Submitted</th><th>Status</th></tr>
+          ${reportRows || '<tr><td colspan="4">No filed reports.</td></tr>'}
+        </table>
+        <h2>Job Files</h2>
+        <table>
+          <tr><th>Category</th><th>File</th><th>Notes</th><th>Link</th></tr>
+          ${fileRows || '<tr><td colspan="4">No files uploaded.</td></tr>'}
+        </table>
+        <h2>Report Attachments</h2>
+        <table>
+          <tr><th>Report</th><th>Attachment</th><th>Link</th></tr>
+          ${attachmentRows || '<tr><td colspan="3">No report attachments.</td></tr>'}
+        </table>
+      </main>
+    </div>
+  </body>
+</html>`;
+};
+
 const getDashboardAccessCode = () =>
   String(process.env.DASHBOARD_ACCESS_CODE || "").trim();
 
@@ -1323,6 +1726,38 @@ const sendAndStoreReport = async ({
     throw error;
   }
 };
+
+exports.appConfig = onRequest(
+  {
+    region: "australia-southeast1",
+    cors: true,
+    memory: "256MiB",
+    timeoutSeconds: 30,
+  },
+  async (request, response) => {
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    if (request.method !== "GET") {
+      response.status(405).json({ error: "GET required." });
+      return;
+    }
+
+    try {
+      response.status(200).json({
+        ok: true,
+        config: await getPublicAppConfig(),
+      });
+    } catch (error) {
+      console.error("appConfig failed", { message: error.message });
+      response.status(500).json({
+        error: error.message || "Unable to load app settings.",
+      });
+    }
+  }
+);
 
 exports.sendReport = onRequest(
   {
@@ -1819,12 +2254,96 @@ exports.dashboard = onRequest(
 
           response.status(200).json({
             ok: true,
+            appConfig: await getPublicAppConfig(),
             jobs: jobsSnapshot.docs.map(formatJob).filter((job) => job.name),
             reports,
             purchaseRequests,
             chargeUpReports,
             hazardReports,
           });
+          return;
+        }
+
+        if (resource === "settings") {
+          response.status(200).json({
+            ok: true,
+            config: await getPublicAppConfig(),
+          });
+          return;
+        }
+
+        if (resource === "jobQr") {
+          const jobNumber = normaliseJobNumber(request.query?.jobNumber);
+          const action = String(request.query?.action || "today").trim() || "today";
+
+          if (!jobNumber) {
+            response.status(400).send("Job number is required.");
+            return;
+          }
+
+          const svg = await QRCode.toString(buildJobActionUrl(jobNumber, action), {
+            type: "svg",
+            margin: 1,
+            width: 320,
+            color: {
+              dark: "#101010",
+              light: "#ffffff",
+            },
+          });
+
+          response.setHeader("Content-Type", "image/svg+xml");
+          response.setHeader("Cache-Control", "no-store");
+          response.status(200).send(svg);
+          return;
+        }
+
+        if (resource === "jobPack") {
+          const jobNumber = normaliseJobNumber(request.query?.jobNumber);
+
+          if (!jobNumber) {
+            response.status(400).send("Job number is required.");
+            return;
+          }
+
+          const jobRef = db.collection("jobs").doc(jobNumber);
+          const [jobDoc, reportsSnapshot, hazardsSnapshot] = await Promise.all([
+            jobRef.get(),
+            reportsCollection
+              .where("jobNumber", "==", jobNumber)
+              .limit(250)
+              .get(),
+            db.collection("hazardIds").limit(500).get(),
+          ]);
+          const job = jobDoc.exists
+            ? formatJob(jobDoc)
+            : { number: jobNumber, name: "", completed: false };
+          const jobInfo = await publicJobInfo(jobRef);
+          const reports = reportsSnapshot.docs
+            .map(publicReport)
+            .sort((firstReport, secondReport) =>
+              String(secondReport.submittedAtIso || "").localeCompare(
+                String(firstReport.submittedAtIso || "")
+              )
+            );
+          const openHazards = hazardsSnapshot.docs
+            .map(publicHazardDraft)
+            .filter(
+              (hazard) =>
+                hazard.jobNumber === jobNumber &&
+                String(hazard.status || "").toLowerCase().includes("active draft")
+            );
+
+          response.setHeader("Content-Type", "text/html; charset=utf-8");
+          response.setHeader("Cache-Control", "no-store");
+          response.status(200).send(
+            buildJobPackHtml({
+              job,
+              jobInfo,
+              reports,
+              openHazards,
+              accessCode: String(request.query?.accessCode || ""),
+            })
+          );
           return;
         }
 
@@ -1971,6 +2490,27 @@ exports.dashboard = onRequest(
       if (request.method === "POST") {
         const action = String(request.body?.action || "");
 
+        if (action === "updateSettings") {
+          const config = normaliseAppConfig({
+            ...DEFAULT_APP_CONFIG,
+            ...(request.body?.config || {}),
+          });
+
+          await getAppConfigRef().set(
+            {
+              ...config,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          response.status(200).json({
+            ok: true,
+            config,
+          });
+          return;
+        }
+
         if (action === "addJob") {
           const jobNumber = normaliseJobNumber(request.body?.number);
           const jobName = normaliseJobName(request.body?.name);
@@ -2080,6 +2620,36 @@ exports.dashboard = onRequest(
             ok: true,
             id: emailResult.messageId || null,
             reportId: reportRef.id,
+          });
+          return;
+        }
+
+        if (action === "updateReportStatus") {
+          const reportId = String(request.body?.reportId || "").trim();
+          const status = normaliseString(request.body?.status, 80, "New");
+          const adminNote = normaliseString(request.body?.adminNote, 2000);
+
+          if (!reportId) {
+            response.status(400).json({ error: "Report ID is required." });
+            return;
+          }
+
+          await reportsCollection.doc(reportId).set(
+            {
+              status,
+              adminNote,
+              reviewedAtIso:
+                status.toLowerCase() === "new" ? "" : new Date().toISOString(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          const reportDoc = await reportsCollection.doc(reportId).get();
+
+          response.status(200).json({
+            ok: true,
+            report: publicReport(reportDoc),
           });
           return;
         }
