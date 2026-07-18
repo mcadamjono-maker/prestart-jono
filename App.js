@@ -168,6 +168,7 @@ const APP_TABS = [
     description: "Sketch drainage plans and file the drawing",
   },
 ];
+const SIMPLE_MENU_TAB_KEYS = ["prestart", "hazard", "chargeup", "jobinfo"];
 
 const EMAILJS_SERVICE_ID =
   process.env.EXPO_PUBLIC_EMAILJS_SERVICE_ID || "service_17tkejm";
@@ -2305,6 +2306,9 @@ export default function App() {
     appConfig?.hazardControls?.length > 0
       ? appConfig.hazardControls
       : HAZARD_CONTROL_OPTIONS;
+  const todayMenuTabs = appConfig?.bossModeEnabled
+    ? APP_TABS.filter((tab) => SIMPLE_MENU_TAB_KEYS.includes(tab.key))
+    : APP_TABS;
   const machineFieldLabel =
     MACHINE_FIELD_LABELS[selectedTemplate] || "Machine ID / Rego";
   const activeRecipientEmail =
@@ -6237,7 +6241,7 @@ export default function App() {
                   isSubmitting={isSubmitting}
                 />
                 <View style={styles.todayActionGrid}>
-                  {APP_TABS.map((tab) => (
+                  {todayMenuTabs.map((tab) => (
                     <Pressable
                       key={`today-${tab.key}`}
                       style={[
