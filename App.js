@@ -168,7 +168,6 @@ const APP_TABS = [
     description: "Sketch drainage plans and file the drawing",
   },
 ];
-const SIMPLE_MENU_TAB_KEYS = ["prestart", "hazard", "chargeup", "jobinfo"];
 
 const EMAILJS_SERVICE_ID =
   process.env.EXPO_PUBLIC_EMAILJS_SERVICE_ID || "service_17tkejm";
@@ -2306,9 +2305,6 @@ export default function App() {
     appConfig?.hazardControls?.length > 0
       ? appConfig.hazardControls
       : HAZARD_CONTROL_OPTIONS;
-  const todayMenuTabs = appConfig?.bossModeEnabled
-    ? APP_TABS.filter((tab) => SIMPLE_MENU_TAB_KEYS.includes(tab.key))
-    : APP_TABS;
   const machineFieldLabel =
     MACHINE_FIELD_LABELS[selectedTemplate] || "Machine ID / Rego";
   const activeRecipientEmail =
@@ -6162,34 +6158,20 @@ export default function App() {
     );
   };
 
-  const openTodayAction = (pageKey) => {
-    const pagesRequiringJob = ["hazard", "chargeup", "jobinfo", "asbuilt"];
+  const selectTodayJob = (jobNumber) => {
+    const selectedJob = jobOptions.find((job) => job.number === jobNumber);
 
-    if (pagesRequiringJob.includes(pageKey) && !selectedTodayJob) {
-      Alert.alert("Select Job", "Choose a job first so the form opens ready.");
-      return;
+    setSelectedTodayJob(jobNumber);
+    setSelectedHazardJob(jobNumber);
+    setSelectedChargeJob(jobNumber);
+    setSelectedInfoJob(jobNumber);
+    setIsHazardJobDropdownOpen(false);
+    setIsChargeJobDropdownOpen(false);
+    setIsInfoJobDropdownOpen(false);
+
+    if (selectedJob?.name && !asBuiltAddress) {
+      setAsBuiltAddress(selectedJob.name);
     }
-
-    if (pageKey === "hazard") {
-      setSelectedHazardJob(selectedTodayJob);
-      setIsHazardJobDropdownOpen(false);
-    }
-
-    if (pageKey === "chargeup") {
-      setSelectedChargeJob(selectedTodayJob);
-      setIsChargeJobDropdownOpen(false);
-    }
-
-    if (pageKey === "jobinfo") {
-      setSelectedInfoJob(selectedTodayJob);
-      setIsInfoJobDropdownOpen(false);
-    }
-
-    if (pageKey === "asbuilt" && selectedTodayJobOption?.name && !asBuiltAddress) {
-      setAsBuiltAddress(selectedTodayJobOption.name);
-    }
-
-    setActivePage(pageKey);
   };
 
   return (
@@ -6229,33 +6211,17 @@ export default function App() {
               <View style={styles.todayPanel}>
                 <Text style={styles.todayTitle}>Today</Text>
                 <Text style={styles.todaySubtitle}>
-                  Pick the job once, then open the form you need.
+                  Pick the job once to preload the job fields.
                 </Text>
                 <StableJobSelect
                   selectedJobNumber={selectedTodayJob}
                   selectedJobOption={selectedTodayJobOption}
                   isOpen={isTodayJobDropdownOpen}
                   setIsOpen={setIsTodayJobDropdownOpen}
-                  onSelectJob={setSelectedTodayJob}
+                  onSelectJob={selectTodayJob}
                   jobOptions={jobOptions}
                   isSubmitting={isSubmitting}
                 />
-                <View style={styles.todayActionGrid}>
-                  {todayMenuTabs.map((tab) => (
-                    <Pressable
-                      key={`today-${tab.key}`}
-                      style={[
-                        styles.todayActionButton,
-                        isSubmitting && styles.disabledButton,
-                      ]}
-                      onPress={() => openTodayAction(tab.key)}
-                      disabled={isSubmitting}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.todayActionText}>{tab.label}</Text>
-                    </Pressable>
-                  ))}
-                </View>
               </View>
 
               <Text style={styles.menuSectionLabel}>All Forms</Text>
@@ -6263,7 +6229,7 @@ export default function App() {
                 <Pressable
                   key={tab.key}
                   style={styles.menuButton}
-                  onPress={() => openTodayAction(tab.key)}
+                  onPress={() => setActivePage(tab.key)}
                   disabled={isSubmitting}
                   accessibilityRole="button"
                 >
@@ -7754,31 +7720,6 @@ const styles = StyleSheet.create({
     color: "#d8d8d8",
     fontSize: 15,
     lineHeight: 21,
-  },
-
-  todayActionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-
-  todayActionButton: {
-    flexGrow: 1,
-    flexBasis: "45%",
-    minHeight: 48,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 16,
-    backgroundColor: "#D7FF2F",
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-
-  todayActionText: {
-    color: "#000",
-    fontSize: 15,
-    fontWeight: "900",
-    textAlign: "center",
   },
 
   menuSectionLabel: {
