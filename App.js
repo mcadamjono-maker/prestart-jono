@@ -3878,19 +3878,57 @@ export default function App() {
     event?.nativeEvent?.stopPropagation?.();
   };
 
-  const getHazardSignOnSummary = () => {
-    if (hazardSignOns.length === 0) return "No workers signed on.";
-
-    return hazardSignOns
-      .map(
-        (signOn, index) =>
-          `${index + 1}. ${signOn.name} - ${signOn.signedAt} - signature captured`
-      )
-      .join("\n");
-  };
-
   const getEventLocation = (event, size, touchSource = null) => {
     const nativeEvent = event.nativeEvent || {};
+
+    if (IS_WEB) {
+      const target =
+        event.currentTarget ||
+        nativeEvent.currentTarget ||
+        event.target ||
+        nativeEvent.target ||
+        null;
+      const rect = target?.getBoundingClientRect?.();
+      const layoutWidth = Math.max(Number(size?.width) || rect?.width || 1, 1);
+      const layoutHeight = Math.max(
+        Number(size?.height) || rect?.height || 1,
+        1
+      );
+      const toLayoutPoint = (x, y) => {
+        if (
+          !rect ||
+          !Number.isFinite(x) ||
+          !Number.isFinite(y) ||
+          rect.width <= 0 ||
+          rect.height <= 0
+        ) {
+          return null;
+        }
+
+        return {
+          x: ((x - rect.left) / rect.width) * layoutWidth,
+          y: ((y - rect.top) / rect.height) * layoutHeight,
+        };
+      };
+      const clientPoint = toLayoutPoint(
+        Number(touchSource?.clientX ?? nativeEvent.clientX),
+        Number(touchSource?.clientY ?? nativeEvent.clientY)
+      );
+
+      if (clientPoint) return clientPoint;
+
+      const scrollX =
+        typeof window !== "undefined" ? Number(window.scrollX || 0) : 0;
+      const scrollY =
+        typeof window !== "undefined" ? Number(window.scrollY || 0) : 0;
+      const pagePoint = toLayoutPoint(
+        Number(touchSource?.pageX ?? nativeEvent.pageX) - scrollX,
+        Number(touchSource?.pageY ?? nativeEvent.pageY) - scrollY
+      );
+
+      if (pagePoint) return pagePoint;
+    }
+
     const directX = Number(
       touchSource?.locationX ??
         nativeEvent.locationX ??
@@ -3906,36 +3944,6 @@ export default function App() {
 
     if (Number.isFinite(directX) && Number.isFinite(directY)) {
       return { x: directX, y: directY };
-    }
-
-    if (IS_WEB) {
-      const target =
-        event.currentTarget ||
-        nativeEvent.currentTarget ||
-        nativeEvent.target ||
-        null;
-      const rect = target?.getBoundingClientRect?.();
-      const clientX = Number(touchSource?.clientX ?? nativeEvent.clientX);
-      const clientY = Number(touchSource?.clientY ?? nativeEvent.clientY);
-
-      if (rect && Number.isFinite(clientX) && Number.isFinite(clientY)) {
-        return {
-          x: clientX - rect.left,
-          y: clientY - rect.top,
-        };
-      }
-
-      const pageX = Number(touchSource?.pageX ?? nativeEvent.pageX);
-      const pageY = Number(touchSource?.pageY ?? nativeEvent.pageY);
-      const scrollX = Number(window?.scrollX || 0);
-      const scrollY = Number(window?.scrollY || 0);
-
-      if (rect && Number.isFinite(pageX) && Number.isFinite(pageY)) {
-        return {
-          x: pageX - scrollX - rect.left,
-          y: pageY - scrollY - rect.top,
-        };
-      }
     }
 
     if (
@@ -5580,168 +5588,6 @@ export default function App() {
         "Variation email opened. Tap send in your email app to finish."
       );
       resetVariationForm();
-    } catch (error) {
-      Alert.alert("Email Failed", getEmailErrorMessage(error));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const submitHazardId = async () => {
-    if (!selectedHazardJob) {
-      Alert.alert("Validation", "Please select the job for this Hazard ID.");
-      return;
-    }
-
-    if (!hazardPreparedBy.trim()) {
-      Alert.alert("Validation", "Please enter who prepared the Hazard ID.");
-      return;
-    }
-
-    if (!hazardSiteAddress.trim()) {
-      Alert.alert("Validation", "Please enter the site address.");
-      return;
-    }
-
-    if (!hazardTaskDescription.trim()) {
-      Alert.alert("Validation", "Please enter the task description.");
-      return;
-    }
-
-    if (!(await confirmEmailSubmit("Hazard ID"))) return;
-
-    setIsSubmitting(true);
-
-    try {
-      const selectedYardChecks = getSelectedLabels(hazardYardChecks);
-      const selectedSiteChecks = getSelectedLabels(hazardSiteChecks);
-      const selectedControls = getSelectedLabels(hazardControls);
-      const hazardDraftPayload = buildHazardDraftPayload();
-      const hazardWeekStart = hazardDraftPayload.weekStart;
-      const subject = `Hazard ID - ${hazardSiteAddress.trim()}`;
-      const message = buildFiledEmail({
-        title: "Hazard Identification Worksheet",
-        reference: selectedHazardJobOption?.name || selectedHazardJob,
-        sections: [
-          {
-            title: "Task Details",
-            rows: [
-              ["Job Name", selectedHazardJobOption?.name],
-              ["Job Number", selectedHazardJob],
-              ["Week Starting", hazardWeekStart],
-              ["Site Address", hazardSiteAddress.trim()],
-              ["Task Description", hazardTaskDescription.trim()],
-              ["Prepared By", hazardPreparedBy.trim()],
-              ["Start Date", hazardStartDate.trim()],
-              ["Finish Date", hazardFinishDate.trim()],
-            ],
-          },
-          {
-            title: "Pre Start Checks",
-            rows: [
-              ["At Yard", selectedYardChecks],
-              ["At Site", selectedSiteChecks],
-            ],
-          },
-          {
-            title: "Hazards and Controls",
-            rows: [
-              ["Hazards / Risks", hazardRisks.trim()],
-              ["Controls in Place", selectedControls],
-              ["Other Controls / Notes", hazardExtraControls.trim()],
-            ],
-          },
-          {
-            title: "Communication",
-            rows: [
-              ["Toolbox Meeting Notes", hazardToolboxMeeting.trim()],
-              ["Worker / Contractor Sign-off Notes", hazardSignOffNotes.trim()],
-              ["Signed-On Workers", getHazardSignOnSummary()],
-            ],
-          },
-        ],
-      });
-      const hazardFields = {
-        report_type: "Hazard Identification Worksheet",
-        template: "hazard_id",
-        job_number: hazardDraftPayload.jobNumber,
-        job_name: hazardDraftPayload.jobName || "",
-        week_start: hazardWeekStart,
-        site_address: hazardSiteAddress.trim(),
-        task_description: hazardTaskDescription.trim(),
-        prepared_by: hazardPreparedBy.trim(),
-        start_date: hazardStartDate.trim() || "Not supplied",
-        finish_date: hazardFinishDate.trim() || "Not supplied",
-        signed_on_workers: getHazardSignOnSummary(),
-      };
-
-      const sentByFirebase = await sendFirebaseReport({
-        reportType: "Hazard ID",
-        subject,
-        message,
-        fields: hazardFields,
-        formData: {
-          jobNumber: hazardDraftPayload.jobNumber,
-          jobName: hazardDraftPayload.jobName || "",
-          weekStart: hazardWeekStart,
-          siteAddress: hazardSiteAddress.trim(),
-          taskDescription: hazardTaskDescription.trim(),
-          preparedBy: hazardPreparedBy.trim(),
-          startDate: hazardStartDate.trim(),
-          finishDate: hazardFinishDate.trim(),
-          signOns: hazardSignOns.map((signOn) => ({
-            name: signOn.name,
-            signedAt: signOn.signedAt,
-            signedAtIso: signOn.signedAtIso,
-            signatureCaptured: true,
-            signatureStrokes: signOn.signatureStrokes,
-          })),
-        },
-      });
-
-      if (sentByFirebase) {
-        if (sentByFirebase !== "queued") {
-          await clearSubmittedHazardDraft(hazardDraftPayload);
-        }
-        Alert.alert(
-          sentByFirebase === "queued" ? "Saved To Outbox" : "Success",
-          getDeliverySuccessMessage(
-            sentByFirebase,
-            "Hazard ID emailed successfully."
-          )
-        );
-        if (sentByFirebase !== "queued") {
-          resetHazardForm();
-        }
-        return;
-      }
-
-      const canCompose = await MailComposer.isAvailableAsync();
-
-      if (!canCompose) {
-        Alert.alert(
-          "Email App Required",
-          "To send a Hazard ID, this device needs an email app set up."
-        );
-        return;
-      }
-
-      const mailResult = await composeMailWithTimeout({
-        recipients: [activeRecipientEmail],
-        subject,
-        body: message,
-      });
-
-      if (mailResult.status === "cancelled") {
-        return;
-      }
-
-      Alert.alert(
-        "Success",
-        "Hazard ID email opened. Tap send in your email app to finish."
-      );
-      await clearSubmittedHazardDraft(hazardDraftPayload);
-      resetHazardForm();
     } catch (error) {
       Alert.alert("Email Failed", getEmailErrorMessage(error));
     } finally {
@@ -7410,21 +7256,6 @@ export default function App() {
                 )}
               </Pressable>
 
-              <Pressable
-                style={[
-                  styles.submitButton,
-                  isSubmitting && styles.disabledButton,
-                ]}
-                onPress={submitHazardId}
-                disabled={isSubmitting}
-                accessibilityRole="button"
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.submitText}>SUBMIT HAZARD ID</Text>
-                )}
-              </Pressable>
             </>
           )}
 
