@@ -2109,8 +2109,6 @@ export default function App() {
   const [poSupplier, setPoSupplier] = useState("");
   const [poDetails, setPoDetails] = useState("");
   const [jobOptions, setJobOptions] = useState(DEFAULT_JOB_OPTIONS);
-  const [selectedTodayJob, setSelectedTodayJob] = useState("");
-  const [isTodayJobDropdownOpen, setIsTodayJobDropdownOpen] = useState(false);
   const [selectedPurchaseJob, setSelectedPurchaseJob] = useState("");
   const [isPurchaseJobDropdownOpen, setIsPurchaseJobDropdownOpen] =
     useState(false);
@@ -2158,14 +2156,11 @@ export default function App() {
   const [hazardTaskDescription, setHazardTaskDescription] = useState("");
   const [hazardPreparedBy, setHazardPreparedBy] = useState("");
   const [hazardStartDate, setHazardStartDate] = useState(getTodayDisplayDate);
-  const [hazardFinishDate, setHazardFinishDate] = useState(getTodayDisplayDate);
   const [hazardYardChecks, setHazardYardChecks] = useState({});
   const [hazardSiteChecks, setHazardSiteChecks] = useState({});
   const [hazardRisks, setHazardRisks] = useState("");
   const [hazardControls, setHazardControls] = useState({});
   const [hazardExtraControls, setHazardExtraControls] = useState("");
-  const [hazardToolboxMeeting, setHazardToolboxMeeting] = useState("");
-  const [hazardSignOffNotes, setHazardSignOffNotes] = useState("");
   const [hazardSignOns, setHazardSignOns] = useState([]);
   const [isHazardSignOnOpen, setIsHazardSignOnOpen] = useState(false);
   const [hazardSignOnName, setHazardSignOnName] = useState("");
@@ -2309,9 +2304,6 @@ export default function App() {
     MACHINE_FIELD_LABELS[selectedTemplate] || "Machine ID / Rego";
   const activeRecipientEmail =
     normalizeEmailAddress(recipientEmail) || DEFAULT_EMAIL_RECIPIENT;
-  const selectedTodayJobOption = jobOptions.find(
-    (job) => job.number === selectedTodayJob
-  );
   const prestartExpiryWarnings = useMemo(() => {
     const warningDays = appConfig?.expiryWarningDays || 30;
     const dateFields =
@@ -3066,14 +3058,11 @@ export default function App() {
     setHazardTaskDescription("");
     setHazardPreparedBy("");
     setHazardStartDate(getTodayDisplayDate());
-    setHazardFinishDate(getTodayDisplayDate());
     setHazardYardChecks({});
     setHazardSiteChecks({});
     setHazardRisks("");
     setHazardControls({});
     setHazardExtraControls("");
-    setHazardToolboxMeeting("");
-    setHazardSignOffNotes("");
     setHazardSignOns([]);
     setIsHazardSignOnOpen(false);
     setHazardSignOnName("");
@@ -3489,14 +3478,11 @@ export default function App() {
     taskDescription: hazardTaskDescription.trim(),
     preparedBy: hazardPreparedBy.trim(),
     startDate: hazardStartDate.trim(),
-    finishDate: hazardFinishDate.trim(),
     yardChecks: hazardYardChecks,
     siteChecks: hazardSiteChecks,
     risks: hazardRisks.trim(),
     controls: hazardControls,
     extraControls: hazardExtraControls.trim(),
-    toolboxMeeting: hazardToolboxMeeting.trim(),
-    signOffNotes: hazardSignOffNotes.trim(),
     signOns: hazardSignOns,
   });
 
@@ -3506,11 +3492,8 @@ export default function App() {
         payload.taskDescription ||
         payload.preparedBy ||
         payload.startDate ||
-        payload.finishDate ||
         payload.risks ||
         payload.extraControls ||
-        payload.toolboxMeeting ||
-        payload.signOffNotes ||
         payload.signOns.length > 0 ||
         Object.values(payload.yardChecks).some(Boolean) ||
         Object.values(payload.siteChecks).some(Boolean) ||
@@ -3528,14 +3511,11 @@ export default function App() {
     );
     setHazardPreparedBy(formData.preparedBy || fields.prepared_by || "");
     setHazardStartDate(formData.startDate || getTodayDisplayDate());
-    setHazardFinishDate(formData.finishDate || getTodayDisplayDate());
     setHazardYardChecks(draft?.yardChecks || {});
     setHazardSiteChecks(draft?.siteChecks || {});
     setHazardRisks(draft?.risks || "");
     setHazardControls(draft?.controls || {});
     setHazardExtraControls(draft?.extraControls || "");
-    setHazardToolboxMeeting(draft?.toolboxMeeting || "");
-    setHazardSignOffNotes(draft?.signOffNotes || "");
     setHazardSignOns(
       Array.isArray(draft?.signOns)
         ? draft.signOns.map((signOn) => ({
@@ -3724,14 +3704,11 @@ export default function App() {
     hazardTaskDescription,
     hazardPreparedBy,
     hazardStartDate,
-    hazardFinishDate,
     hazardYardChecks,
     hazardSiteChecks,
     hazardRisks,
     hazardControls,
     hazardExtraControls,
-    hazardToolboxMeeting,
-    hazardSignOffNotes,
     hazardSignOns,
     isHazardDraftLoading,
   ]);
@@ -6004,22 +5981,6 @@ export default function App() {
     );
   };
 
-  const selectTodayJob = (jobNumber) => {
-    const selectedJob = jobOptions.find((job) => job.number === jobNumber);
-
-    setSelectedTodayJob(jobNumber);
-    setSelectedHazardJob(jobNumber);
-    setSelectedChargeJob(jobNumber);
-    setSelectedInfoJob(jobNumber);
-    setIsHazardJobDropdownOpen(false);
-    setIsChargeJobDropdownOpen(false);
-    setIsInfoJobDropdownOpen(false);
-
-    if (selectedJob?.name && !asBuiltAddress) {
-      setAsBuiltAddress(selectedJob.name);
-    }
-  };
-
   return (
     <SafeAreaProvider>
       <ImageBackground
@@ -6054,23 +6015,6 @@ export default function App() {
 
           {activePage === "menu" && (
             <View style={styles.menu}>
-              <View style={styles.todayPanel}>
-                <Text style={styles.todayTitle}>Today</Text>
-                <Text style={styles.todaySubtitle}>
-                  Pick the job once to preload the job fields.
-                </Text>
-                <StableJobSelect
-                  selectedJobNumber={selectedTodayJob}
-                  selectedJobOption={selectedTodayJobOption}
-                  isOpen={isTodayJobDropdownOpen}
-                  setIsOpen={setIsTodayJobDropdownOpen}
-                  onSelectJob={selectTodayJob}
-                  jobOptions={jobOptions}
-                  isSubmitting={isSubmitting}
-                />
-              </View>
-
-              <Text style={styles.menuSectionLabel}>All Forms</Text>
               {APP_TABS.map((tab) => (
                 <Pressable
                   key={tab.key}
@@ -6946,15 +6890,6 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <DraftTextInput
-                  placeholder="Finish Date"
-                  placeholderTextColor="#8a8a8a"
-                  style={styles.input}
-                  value={hazardFinishDate}
-                  onChangeText={setHazardFinishDate}
-                  editable={!isSubmitting}
-                />
-
                 <Text style={styles.formSectionTitle}>Pre Start at Yard</Text>
                 <View style={styles.optionGrid}>
                   {hazardYardCheckOptions.map((item) => {
@@ -7072,30 +7007,6 @@ export default function App() {
                   style={styles.notes}
                   value={hazardExtraControls}
                   onChangeText={setHazardExtraControls}
-                  editable={!isSubmitting}
-                />
-
-                <View style={styles.inputGap} />
-
-                <DraftTextInput
-                  placeholder="Toolbox meeting notes..."
-                  placeholderTextColor="#8a8a8a"
-                  multiline
-                  style={styles.notes}
-                  value={hazardToolboxMeeting}
-                  onChangeText={setHazardToolboxMeeting}
-                  editable={!isSubmitting}
-                />
-
-                <View style={styles.inputGap} />
-
-                <DraftTextInput
-                  placeholder="Worker / contractor sign-off notes..."
-                  placeholderTextColor="#8a8a8a"
-                  multiline
-                  style={styles.notes}
-                  value={hazardSignOffNotes}
-                  onChangeText={setHazardSignOffNotes}
                   editable={!isSubmitting}
                 />
 
@@ -7230,7 +7141,7 @@ export default function App() {
 
               <Pressable
                 style={[
-                  styles.secondaryButton,
+                  styles.hazardSaveButton,
                   styles.bottomSecondaryButton,
                   (!selectedHazardJob ||
                     isSubmitting ||
@@ -7248,9 +7159,9 @@ export default function App() {
                 accessibilityRole="button"
               >
                 {isHazardDraftSaving ? (
-                  <ActivityIndicator color="#D7FF2F" />
+                  <ActivityIndicator color="#000" />
                 ) : (
-                  <Text style={styles.secondaryButtonText}>
+                  <Text style={styles.hazardSaveButtonText}>
                     SAVE HAZARD ID FOR WEEK
                   </Text>
                 )}
@@ -7530,35 +7441,6 @@ const styles = StyleSheet.create({
     gap: 14,
     marginTop: 24,
     marginHorizontal: 18,
-  },
-
-  todayPanel: {
-    backgroundColor: "rgba(8,8,8,0.82)",
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "rgba(215,255,47,0.32)",
-    gap: 12,
-  },
-
-  todayTitle: {
-    color: "#D7FF2F",
-    fontSize: 25,
-    fontWeight: "900",
-  },
-
-  todaySubtitle: {
-    color: "#d8d8d8",
-    fontSize: 15,
-    lineHeight: 21,
-  },
-
-  menuSectionLabel: {
-    color: "#D7FF2F",
-    fontSize: 14,
-    fontWeight: "900",
-    textTransform: "uppercase",
-    marginTop: 8,
   },
 
   menuButton: {
@@ -8234,6 +8116,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
     backgroundColor: "#111",
+  },
+
+  hazardSaveButton: {
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#D7FF2F",
+    backgroundColor: "#D7FF2F",
+  },
+
+  hazardSaveButtonText: {
+    color: "#000",
+    fontSize: 15,
+    fontWeight: "900",
   },
 
   bottomSecondaryButton: {
