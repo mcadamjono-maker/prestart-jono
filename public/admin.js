@@ -3,7 +3,6 @@ const DASHBOARD_ENDPOINT =
 const JOB_INFO_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const ACCESS_CODE_KEY = "wdl-dashboard-access-code";
-const BOSS_MODE_KEY = "wdl-dashboard-boss-mode";
 const WEB_APP_URL = "https://wdl-field-forms.web.app";
 const CALENDAR_REFRESH_MS = 10000;
 const REPORT_STATUSES = ["New", "Reviewed", "Needs Action", "Filed"];
@@ -20,7 +19,6 @@ const state = {
   selectedJobNumber: "",
   selectedJobInfo: null,
   showCompletedJobs: false,
-  bossMode: localStorage.getItem(BOSS_MODE_KEY) === "1",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -403,19 +401,12 @@ const renderMetrics = () => {
   setText("#jobCount", state.jobs.filter((job) => !job.completed).length);
 };
 
-const applyBossMode = () => {
-  document.body.classList.toggle("boss-mode", state.bossMode);
-  setText("#toggleBossMode", state.bossMode ? "Full View" : "Simple View");
-};
-
 const renderSettings = () => {
   const config = state.appConfig || {};
   const templates = config.checklistTemplates || {};
 
   setValue("#settingRecipientEmails", listToLines(config.recipientEmails || []));
   setValue("#settingExpiryWarningDays", config.expiryWarningDays || 30);
-  const bossModeInput = $("#settingBossMode");
-  if (bossModeInput) bossModeInput.checked = Boolean(config.bossModeEnabled);
   setValue("#settingTruckChecklist", sectionsToText(templates.truck || []));
   setValue("#settingDiggerChecklist", sectionsToText(templates.digger || []));
   setValue("#settingTrailerChecklist", sectionsToText(templates.trailer || []));
@@ -739,7 +730,6 @@ const saveSettings = async () => {
   const config = {
     recipientEmails: linesToList($("#settingRecipientEmails").value),
     expiryWarningDays: Number($("#settingExpiryWarningDays").value || 30),
-    bossModeEnabled: Boolean($("#settingBossMode").checked),
     checklistTemplates: {
       truck: textToSections($("#settingTruckChecklist").value),
       digger: textToSections($("#settingDiggerChecklist").value),
@@ -1290,7 +1280,6 @@ const init = () => {
   setValue("#accessCode", getAccessCode());
   initialiseWeek();
   renderSelectedJobInfo();
-  applyBossMode();
 
   $("#saveAccessCode").addEventListener("click", () => {
     localStorage.setItem(ACCESS_CODE_KEY, $("#accessCode").value.trim());
@@ -1300,11 +1289,6 @@ const init = () => {
   $("#refreshDashboard").addEventListener("click", () =>
     loadSummary().then(loadCalendar).catch((error) => alert(error.message))
   );
-  $("#toggleBossMode").addEventListener("click", () => {
-    state.bossMode = !state.bossMode;
-    localStorage.setItem(BOSS_MODE_KEY, state.bossMode ? "1" : "0");
-    applyBossMode();
-  });
   $("#saveSettings").addEventListener("click", () =>
     saveSettings().catch((error) => alert(error.message))
   );

@@ -525,7 +525,6 @@ const normalizeAppConfig = (config) => {
       1,
       Math.min(120, Number(config.expiryWarningDays || 30))
     ),
-    bossModeEnabled: Boolean(config.bossModeEnabled),
     checklistTemplates: normalizeChecklistTemplates(config.checklistTemplates),
     hazardYardChecks: normalizeStringList(
       config.hazardYardChecks,
@@ -2339,6 +2338,22 @@ export default function App() {
   const selectedHazardJobOption = jobOptions.find(
     (job) => job.number === selectedHazardJob
   );
+  const todayHazardSignOns = useMemo(() => {
+    const todayIso = getNzIsoDate();
+
+    return hazardSignOns.filter((signOn) => {
+      const signOnDate = String(signOn?.date || "").slice(0, 10);
+
+      if (signOnDate) return signOnDate === todayIso;
+
+      const signedAtIso = String(signOn?.signedAtIso || "").trim();
+      const signedAtDate = signedAtIso ? new Date(signedAtIso) : null;
+
+      if (!signedAtDate || Number.isNaN(signedAtDate.getTime())) return false;
+
+      return getNzIsoDate(signedAtDate) === todayIso;
+    });
+  }, [hazardSignOns]);
   const asBuiltMapImageUrl = useMemo(
     () => createAsBuiltMapUrl(asBuiltAddress, FIREBASE_STATIC_MAP_ENDPOINT),
     [asBuiltAddress]
@@ -4674,6 +4689,7 @@ export default function App() {
       name: hazardSignOnName.trim(),
       signedAt: getSubmittedAt(),
       signedAtIso: new Date().toISOString(),
+      date: getNzIsoDate(),
       signatureStrokes: hazardSignatureStrokes,
     };
     const nextSignOns = [...hazardSignOns, newSignOn];
@@ -7117,10 +7133,12 @@ export default function App() {
                   </View>
                 )}
 
-                {hazardSignOns.length > 0 && (
+                {todayHazardSignOns.length > 0 && (
                   <View style={styles.signOnList}>
-                    <Text style={styles.formSectionTitle}>People Signed On</Text>
-                    {hazardSignOns.map((signOn, index) => (
+                    <Text style={styles.formSectionTitle}>
+                      People Signed On Today
+                    </Text>
+                    {todayHazardSignOns.map((signOn, index) => (
                       <View
                         key={`${signOn.name}-${signOn.signedAt}-${index}`}
                         style={styles.signOnListItem}

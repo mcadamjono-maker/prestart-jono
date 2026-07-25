@@ -232,12 +232,6 @@ main {
   font-weight: 800;
 }
 
-.topbar button.subtle-button {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #ffffff;
-}
-
 .badge {
   display: inline-flex;
   align-items: center;
@@ -834,17 +828,6 @@ h2 {
 
 .report-workflow textarea {
   min-height: 88px;
-}
-
-.boss-mode .metrics,
-.boss-mode #reports .filters,
-.boss-mode #settings,
-.boss-mode .report-summary-grid {
-  display: none;
-}
-
-.boss-mode main {
-  max-width: 900px;
 }
 
 .job-info-grid label {

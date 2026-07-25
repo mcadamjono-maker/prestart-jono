@@ -1,4 +1,5 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const QRCode = require("qrcode");
 
@@ -24,7 +25,6 @@ const DEFAULT_APP_CONFIG = {
   ],
   defaultRecipientEmail: "Jonomcadam@hotmail.com",
   expiryWarningDays: 30,
-  bossModeEnabled: false,
   checklistTemplates: {
     truck: [
       {
@@ -331,7 +331,6 @@ const normaliseAppConfig = (value = {}) => {
     recipientEmails: safeRecipientEmails,
     defaultRecipientEmail,
     expiryWarningDays,
-    bossModeEnabled: Boolean(source.bossModeEnabled),
     checklistTemplates: normaliseChecklistTemplates(source.checklistTemplates),
     hazardYardChecks: normaliseStringList(
       source.hazardYardChecks,
@@ -1711,6 +1710,85 @@ const sendAndStoreReport = async ({
   }
 };
 
+const submitHazardDraftReport = async ({
+  hazardRef,
+  hazardDoc,
+  recipientEmail,
+}) => {
+  const reportPayload = buildHazardDraftReportPayload(hazardDoc);
+  const { emailResult, reportRef } = await sendAndStoreReport({
+    ...reportPayload,
+    recipientEmail,
+    attachments: [],
+  });
+
+  await hazardRef.delete();
+
+  return {
+    messageId: emailResult.messageId || null,
+    reportId: reportRef.id,
+  };
+};
+
+exports.submitWeeklyHazardDrafts = onSchedule(
+  {
+    schedule: "0 7 * * MON",
+    timeZone: NZ_TIME_ZONE,
+    region: "australia-southeast1",
+    memory: "512MiB",
+    timeoutSeconds: 540,
+    secrets: ["MAILEROO_SMTP_USER", "MAILEROO_SMTP_PASS"],
+  },
+  async () => {
+    const db = getFirestore();
+    const appConfig = await getPublicAppConfig();
+    const recipientEmail = normaliseRecipientEmail(
+      appConfig.defaultRecipientEmail || DEFAULT_TO_EMAIL
+    );
+    const snapshot = await db.collection("hazardIds").limit(500).get();
+    let submitted = 0;
+    let failed = 0;
+
+    for (const hazardDoc of snapshot.docs) {
+      try {
+        await submitHazardDraftReport({
+          hazardRef: hazardDoc.ref,
+          hazardDoc,
+          recipientEmail,
+        });
+        submitted += 1;
+      } catch (error) {
+        failed += 1;
+        console.error("weekly Hazard ID auto-submit failed", {
+          hazardId: hazardDoc.id,
+          message: error.message,
+        });
+        await hazardDoc.ref.set(
+          {
+            autoSubmitLastError: String(error.message || "Unknown error").slice(
+              0,
+              500
+            ),
+            autoSubmitLastAttemptAtIso: new Date().toISOString(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    }
+
+    console.log("weekly Hazard ID auto-submit complete", {
+      submitted,
+      failed,
+      checked: snapshot.size,
+    });
+
+    if (failed > 0) {
+      throw new Error(`Failed to auto-submit ${failed} Hazard ID draft(s).`);
+    }
+  }
+);
+
 exports.appConfig = onRequest(
   {
     region: "australia-southeast1",
@@ -2591,19 +2669,16 @@ exports.dashboard = onRequest(
             return;
           }
 
-          const reportPayload = buildHazardDraftReportPayload(hazardDoc);
-          const { emailResult, reportRef } = await sendAndStoreReport({
-            ...reportPayload,
+          const result = await submitHazardDraftReport({
+            hazardRef,
+            hazardDoc,
             recipientEmail,
-            attachments: [],
           });
-
-          await hazardRef.delete();
 
           response.status(200).json({
             ok: true,
-            id: emailResult.messageId || null,
-            reportId: reportRef.id,
+            id: result.messageId,
+            reportId: result.reportId,
           });
           return;
         }

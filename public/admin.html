@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111111" />
     <title>WDL Office Dashboard</title>
     <link rel="icon" href="/favicon.ico" />
-    <link rel="stylesheet" href="/admin.css?v=20260718-1" />
+    <link rel="stylesheet" href="/admin.css?v=20260725-1" />
   </head>
   <body>
     <header class="topbar">
@@ -23,7 +23,6 @@
         />
         <button id="saveAccessCode" type="button">Save</button>
         <button id="refreshDashboard" type="button">Refresh</button>
-        <button id="toggleBossMode" class="subtle-button" type="button">Simple View</button>
       </div>
     </header>
 
@@ -203,10 +202,6 @@
             Expiry Warning Days
             <input id="settingExpiryWarningDays" type="number" min="1" max="120" />
           </label>
-          <label class="checkbox-setting">
-            <input id="settingBossMode" type="checkbox" />
-            Simple field menu by default
-          </label>
           <label>
             Truck / Ute Checklist
             <textarea id="settingTruckChecklist" class="template-textarea"></textarea>
@@ -246,6 +241,6 @@
       <div class="empty">Nothing to show yet.</div>
     </template>
 
-    <script src="/admin.js?v=20260718-1" defer></script>
+    <script src="/admin.js?v=20260725-1" defer></script>
   </body>
 </html>
