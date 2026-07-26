@@ -79,6 +79,22 @@ h2 {
   gap: 10px;
 }
 
+.inline-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.inline-filter input {
+  width: auto;
+  min-height: auto;
+}
+
 input,
 select,
 textarea {
@@ -254,6 +270,11 @@ main {
   color: #126728;
 }
 
+.badge.archived {
+  background: #efefef;
+  color: #555555;
+}
+
 .actions {
   display: flex;
   align-items: center;
@@ -266,7 +287,8 @@ main {
   color: #ffffff;
 }
 
-.actions button.danger {
+.actions button.danger,
+.print-actions button.danger {
   border-color: rgba(255, 80, 80, 0.65);
   background: rgba(255, 80, 80, 0.12);
   color: #ffb1b1;

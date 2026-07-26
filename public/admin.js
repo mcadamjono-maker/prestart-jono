@@ -5,7 +5,7 @@ const JOB_INFO_ENDPOINT =
 const ACCESS_CODE_KEY = "wdl-dashboard-access-code";
 const WEB_APP_URL = "https://wdl-field-forms.web.app";
 const CALENDAR_REFRESH_MS = 10000;
-const REPORT_STATUSES = ["New", "Reviewed", "Needs Action", "Filed"];
+const REPORT_STATUSES = ["New", "Reviewed", "Needs Action", "Filed", "Archived"];
 let calendarRefreshTimer = null;
 
 const state = {
@@ -19,6 +19,7 @@ const state = {
   selectedJobNumber: "",
   selectedJobInfo: null,
   showCompletedJobs: false,
+  showArchivedReports: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -383,6 +384,10 @@ const isOpenHazard = (hazard) =>
   String(hazard?.status || "").toLowerCase().includes("active draft") ||
   String(hazard?.subject || "").toLowerCase().includes("hazard id draft");
 
+const isArchivedReport = (report) =>
+  Boolean(report?.archived) ||
+  String(report?.status || "").toLowerCase() === "archived";
+
 const hazardSignOnCount = (hazard) => {
   const formSignOns = hazard?.formData?.signOns;
 
@@ -394,9 +399,13 @@ const hazardSignOnCount = (hazard) => {
 
 const renderMetrics = () => {
   const openHazards = state.hazardReports.filter(isOpenHazard);
+  const activeReports = state.reports.filter((report) => !isArchivedReport(report));
 
-  setText("#reportCount", state.reports.length);
-  setText("#chargeUpCount", state.chargeUpReports.length);
+  setText("#reportCount", activeReports.length);
+  setText(
+    "#chargeUpCount",
+    activeReports.filter((report) => report.reportType === "Charge Up Job Record").length
+  );
   setText("#hazardCount", openHazards.length);
   setText("#jobCount", state.jobs.filter((job) => !job.completed).length);
 };
@@ -418,10 +427,16 @@ const renderSettings = () => {
 const renderReports = () => {
   const search = $("#reportSearch").value.toLowerCase().trim();
   const type = $("#reportTypeFilter").value;
+  const showArchived = state.showArchivedReports;
   const filtered = state.reports.filter((report) => {
     const haystack = JSON.stringify(report).toLowerCase();
+    const archived = isArchivedReport(report);
 
-    return (!type || report.reportType === type) && (!search || haystack.includes(search));
+    return (
+      (showArchived || !archived) &&
+      (!type || report.reportType === type) &&
+      (!search || haystack.includes(search))
+    );
   });
 
   setHtml(
@@ -435,8 +450,19 @@ const renderReports = () => {
               <div class="meta">${reportMeta(report)}</div>
             </div>
             <div class="actions">
+              ${
+                isArchivedReport(report)
+                  ? '<span class="badge archived">Archived</span>'
+                  : ""
+              }
               <span class="badge">${escapeHtml(report.reportType)}</span>
               <button type="button" data-open-report="${report.id}">Open</button>
+              ${
+                isArchivedReport(report)
+                  ? `<button class="secondary" type="button" data-restore-report="${escapeHtml(report.id)}">Restore</button>`
+                  : `<button class="secondary" type="button" data-archive-report="${escapeHtml(report.id)}">Archive</button>`
+              }
+              <button class="secondary danger" type="button" data-delete-report="${escapeHtml(report.id)}">Delete</button>
             </div>
           </article>`
       )
@@ -768,6 +794,13 @@ const saveReportWorkflow = async () => {
 
   if (!updatedReport) return;
 
+  replaceReportInState(updatedReport);
+  openReportObject(updatedReport);
+};
+
+const replaceReportInState = (updatedReport) => {
+  if (!updatedReport) return;
+
   state.selectedReport = updatedReport;
   state.reports = [
     updatedReport,
@@ -776,7 +809,7 @@ const saveReportWorkflow = async () => {
     String(b.submittedAtIso || "").localeCompare(String(a.submittedAtIso || ""))
   );
   state.chargeUpReports = state.reports.filter(
-    (report) => report.reportType === "Charge Up Job Record"
+    (report) => report.reportType === "Charge Up Job Record" && !isArchivedReport(report)
   );
   state.hazardReports = [
     ...state.hazardReports.filter(
@@ -786,7 +819,54 @@ const saveReportWorkflow = async () => {
   ];
   renderReports();
   renderMetrics();
-  openReportObject(updatedReport);
+};
+
+const setReportArchived = async (reportId, archived) => {
+  const report = state.reports.find((item) => item.id === reportId);
+  const title = report?.subject || report?.reportType || "this report";
+  const actionLabel = archived ? "Archive" : "Restore";
+
+  if (!confirm(`${actionLabel} ${title}?`)) return;
+
+  const payload = await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: archived ? "archiveReport" : "restoreReport",
+      reportId,
+    }),
+  });
+
+  replaceReportInState(payload.report);
+  if (payload.report) openReportObject(payload.report);
+};
+
+const deleteReport = async (reportId) => {
+  const report = state.reports.find((item) => item.id === reportId);
+  const title = report?.subject || report?.reportType || "this report";
+
+  if (
+    !confirm(
+      `Delete ${title}? This permanently removes the filed report and stored attachments.`
+    )
+  ) {
+    return;
+  }
+
+  await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "deleteReport",
+      reportId,
+    }),
+  });
+
+  state.reports = state.reports.filter((item) => item.id !== reportId);
+  state.chargeUpReports = state.chargeUpReports.filter((item) => item.id !== reportId);
+  state.hazardReports = state.hazardReports.filter((item) => item.id !== reportId);
+  if (state.selectedReport?.id === reportId) closeReport();
+  renderReports();
+  renderMetrics();
+  renderOpenHazards();
 };
 
 const copyLink = async (link) => {
@@ -1031,6 +1111,12 @@ const openReportObject = (report) => {
     <div class="print-actions">
       <button type="button" id="printReport">Print / Save PDF</button>
       <button type="button" id="downloadReport">Download HTML</button>
+      ${
+        isArchivedReport(report)
+          ? '<button class="secondary" type="button" id="restoreReport">Restore</button>'
+          : '<button class="secondary" type="button" id="archiveReport">Archive</button>'
+      }
+      <button class="secondary danger" type="button" id="deleteReport">Delete</button>
     </div>
     <article class="report-preview">
       <header>
@@ -1294,6 +1380,10 @@ const init = () => {
   );
   $("#reportSearch").addEventListener("input", renderReports);
   $("#reportTypeFilter").addEventListener("change", renderReports);
+  $("#showArchivedReports").addEventListener("change", (event) => {
+    state.showArchivedReports = Boolean(event.target.checked);
+    renderReports();
+  });
   $("#calendarWeek").addEventListener("change", handleCalendarWeekInput);
   window.addEventListener("focus", refreshCalendarQuietly);
   document.addEventListener("visibilitychange", () => {
@@ -1343,6 +1433,9 @@ const init = () => {
 
   document.body.addEventListener("click", (event) => {
     const openReportId = event.target.closest("[data-open-report]")?.dataset.openReport;
+    const archiveReportId = event.target.closest("[data-archive-report]")?.dataset.archiveReport;
+    const restoreReportId = event.target.closest("[data-restore-report]")?.dataset.restoreReport;
+    const deleteReportId = event.target.closest("[data-delete-report]")?.dataset.deleteReport;
     const openHazardId = event.target.closest("[data-open-hazard]")?.dataset.openHazard;
     const submitHazardId = event.target.closest("[data-submit-hazard]")?.dataset.submitHazard;
     const deleteHazardId = event.target.closest("[data-delete-hazard]")?.dataset.deleteHazard;
@@ -1352,6 +1445,13 @@ const init = () => {
     const copyLinkButton = event.target.closest("[data-copy-link]");
 
     if (openReportId) openReport(openReportId);
+    if (archiveReportId) {
+      setReportArchived(archiveReportId, true).catch((error) => alert(error.message));
+    }
+    if (restoreReportId) {
+      setReportArchived(restoreReportId, false).catch((error) => alert(error.message));
+    }
+    if (deleteReportId) deleteReport(deleteReportId).catch((error) => alert(error.message));
     if (openHazardId) openHazard(openHazardId);
     if (submitHazardId) submitOpenHazard(submitHazardId).catch((error) => alert(error.message));
     if (deleteHazardId) deleteOpenHazard(deleteHazardId).catch((error) => alert(error.message));
@@ -1396,6 +1496,22 @@ const init = () => {
 
     if (event.target.id === "saveReportWorkflow" && state.selectedReport) {
       saveReportWorkflow().catch((error) => alert(error.message));
+    }
+
+    if (event.target.id === "archiveReport" && state.selectedReport) {
+      setReportArchived(state.selectedReport.id, true).catch((error) =>
+        alert(error.message)
+      );
+    }
+
+    if (event.target.id === "restoreReport" && state.selectedReport) {
+      setReportArchived(state.selectedReport.id, false).catch((error) =>
+        alert(error.message)
+      );
+    }
+
+    if (event.target.id === "deleteReport" && state.selectedReport) {
+      deleteReport(state.selectedReport.id).catch((error) => alert(error.message));
     }
   });
 

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111111" />
     <title>WDL Office Dashboard</title>
     <link rel="icon" href="/favicon.ico" />
-    <link rel="stylesheet" href="/admin.css?v=20260725-1" />
+    <link rel="stylesheet" href="/admin.css?v=20260727-1" />
   </head>
   <body>
     <header class="topbar">
@@ -70,6 +70,10 @@
               <option>Hazard ID</option>
               <option>As-Built Plan</option>
             </select>
+            <label class="inline-filter">
+              <input id="showArchivedReports" type="checkbox" />
+              Show archived
+            </label>
           </div>
         </div>
         <div id="reportsList" class="list"></div>
@@ -241,6 +245,6 @@
       <div class="empty">Nothing to show yet.</div>
     </template>
 
-    <script src="/admin.js?v=20260725-1" defer></script>
+    <script src="/admin.js?v=20260727-1" defer></script>
   </body>
 </html>

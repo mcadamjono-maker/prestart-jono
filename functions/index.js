@@ -1426,6 +1426,10 @@ const publicReport = (doc) => {
     fields: data.fields || {},
     formData: data.formData || {},
     status: data.status || "Filed",
+    archived:
+      Boolean(data.archived) ||
+      String(data.status || "").toLowerCase() === "archived",
+    archivedAtIso: data.archivedAtIso || "",
     jobNumber: data.jobNumber || "",
     jobName: data.jobName || "",
     siteAddress: data.siteAddress || "",
@@ -2297,7 +2301,8 @@ exports.dashboard = onRequest(
             (report) => report.reportType === "Purchase Order Request"
           );
           const chargeUpReports = reports.filter(
-            (report) => report.reportType === "Charge Up Job Record"
+            (report) =>
+              report.reportType === "Charge Up Job Record" && !report.archived
           );
           const openHazardDrafts = hazardDraftsSnapshot.docs
             .map(publicHazardDraft)
@@ -2693,9 +2698,27 @@ exports.dashboard = onRequest(
             return;
           }
 
+          const reportRef = reportsCollection.doc(reportId);
+          const reportDoc = await reportRef.get();
+
+          if (!reportDoc.exists) {
+            response.status(404).json({ error: "Report was not found." });
+            return;
+          }
+
+          const data = reportDoc.data() || {};
+          const statusIsArchived = status.toLowerCase() === "archived";
+          const previousStatus =
+            statusIsArchived && String(data.status || "").toLowerCase() !== "archived"
+              ? data.status || "Filed"
+              : data.previousStatus || "";
+
           await reportsCollection.doc(reportId).set(
             {
               status,
+              archived: statusIsArchived,
+              archivedAtIso: statusIsArchived ? new Date().toISOString() : "",
+              previousStatus: statusIsArchived ? previousStatus : "",
               adminNote,
               reviewedAtIso:
                 status.toLowerCase() === "new" ? "" : new Date().toISOString(),
@@ -2704,12 +2727,88 @@ exports.dashboard = onRequest(
             { merge: true }
           );
 
-          const reportDoc = await reportsCollection.doc(reportId).get();
+          response.status(200).json({
+            ok: true,
+            report: publicReport(await reportRef.get()),
+          });
+          return;
+        }
+
+        if (action === "archiveReport" || action === "restoreReport") {
+          const reportId = String(request.body?.reportId || "").trim();
+
+          if (!reportId) {
+            response.status(400).json({ error: "Report ID is required." });
+            return;
+          }
+
+          const reportRef = reportsCollection.doc(reportId);
+          const reportDoc = await reportRef.get();
+
+          if (!reportDoc.exists) {
+            response.status(404).json({ error: "Report was not found." });
+            return;
+          }
+
+          const data = reportDoc.data() || {};
+          const nowIso = new Date().toISOString();
+
+          if (action === "archiveReport") {
+            const previousStatus =
+              String(data.status || "").toLowerCase() === "archived"
+                ? data.previousStatus || "Filed"
+                : data.status || "Filed";
+
+            await reportRef.set(
+              {
+                archived: true,
+                archivedAtIso: nowIso,
+                previousStatus,
+                status: "Archived",
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+          } else {
+            await reportRef.set(
+              {
+                archived: false,
+                archivedAtIso: "",
+                previousStatus: "",
+                status: data.previousStatus || "Filed",
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+          }
 
           response.status(200).json({
             ok: true,
-            report: publicReport(reportDoc),
+            report: publicReport(await reportRef.get()),
           });
+          return;
+        }
+
+        if (action === "deleteReport") {
+          const reportId = String(request.body?.reportId || "").trim();
+
+          if (!reportId) {
+            response.status(400).json({ error: "Report ID is required." });
+            return;
+          }
+
+          const reportRef = reportsCollection.doc(reportId);
+          const reportDoc = await reportRef.get();
+
+          if (!reportDoc.exists) {
+            response.status(404).json({ error: "Report was not found." });
+            return;
+          }
+
+          await deleteStoredAttachments(reportDoc.data()?.attachmentSummary || []);
+          await reportRef.delete();
+
+          response.status(200).json({ ok: true });
           return;
         }
 
