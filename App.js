@@ -2496,7 +2496,6 @@ export default function App() {
     const nextPage = pageMap[action] || "menu";
 
     if (jobNumber) {
-      setSelectedTodayJob(jobNumber);
       setSelectedHazardJob(jobNumber);
       setSelectedChargeJob(jobNumber);
       setSelectedInfoJob(jobNumber);
