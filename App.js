@@ -28,6 +28,7 @@ import Svg, {
   Path,
   Polyline,
   Rect,
+  Text as SvgText,
 } from "react-native-svg";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -163,6 +164,11 @@ const APP_TABS = [
     description: "Complete a site task analysis",
   },
   {
+    key: "calculators",
+    label: "Calculation Tools",
+    description: "Falls, ratios, angles, and invert levels",
+  },
+  {
     key: "asbuilt",
     label: "As-Built's",
     description: "Sketch drainage plans and file the drawing",
@@ -190,6 +196,39 @@ const DEFAULT_EMAIL_RECIPIENT = RECIPIENT_EMAIL_OPTIONS[0];
 const ALLOWED_RECIPIENT_EMAILS = RECIPIENT_EMAIL_OPTIONS.map((email) =>
   email.toLowerCase()
 );
+const COMMON_GRADE_RATIOS = [40, 60, 80, 100, 120];
+const CALCULATOR_EMPTY_RESULT = "Enter values";
+
+const parseCalculatorNumber = (value) => {
+  if (value === null || value === undefined) return null;
+
+  const cleanedValue = String(value)
+    .trim()
+    .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  if (!cleanedValue || cleanedValue === "." || cleanedValue === "-") {
+    return null;
+  }
+
+  const parsedValue = Number(cleanedValue);
+
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+};
+
+const isPositiveNumber = (value) =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+const formatCalculatorNumber = (value, decimals = 2) => {
+  if (!Number.isFinite(value)) return CALCULATOR_EMPTY_RESULT;
+
+  const roundedValue = Number(value.toFixed(decimals));
+
+  return roundedValue.toLocaleString("en-NZ", {
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: 0,
+  });
+};
 const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
 const DEFAULT_FIREBASE_REPORT_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/sendReport";
@@ -1555,6 +1594,72 @@ const FailCrossIcon = ({ active }) => (
   </Svg>
 );
 
+const CalculatorSlopeIcon = () => (
+  <Svg width="100%" height={118} viewBox="0 0 320 118" pointerEvents="none">
+    <Line
+      x1={28}
+      y1={92}
+      x2={282}
+      y2={92}
+      stroke="#d9d9d9"
+      strokeWidth={3}
+      strokeLinecap="round"
+    />
+    <Line
+      x1={282}
+      y1={92}
+      x2={282}
+      y2={38}
+      stroke="#d9d9d9"
+      strokeWidth={3}
+      strokeLinecap="round"
+    />
+    <Line
+      x1={28}
+      y1={92}
+      x2={282}
+      y2={38}
+      stroke="#D7FF2F"
+      strokeWidth={3}
+      strokeLinecap="round"
+    />
+    <Path
+      d="M61 92 A34 34 0 0 1 91 84"
+      fill="none"
+      stroke="#d9d9d9"
+      strokeWidth={2}
+      strokeLinecap="round"
+    />
+    <SvgText
+      x={50}
+      y={82}
+      fill="#d9d9d9"
+      fontSize={12}
+      fontWeight="700"
+    >
+      angle
+    </SvgText>
+    <SvgText
+      x={139}
+      y={108}
+      fill="#d9d9d9"
+      fontSize={12}
+      fontWeight="700"
+    >
+      run
+    </SvgText>
+    <SvgText
+      x={290}
+      y={68}
+      fill="#d9d9d9"
+      fontSize={12}
+      fontWeight="700"
+    >
+      fall
+    </SvgText>
+  </Svg>
+);
+
 const AsBuiltLineSample = ({
   color = "#fff",
   strokeWidth = 2,
@@ -2084,6 +2189,16 @@ export default function App() {
   const [settingsJobNumber, setSettingsJobNumber] = useState("");
   const [settingsJobName, setSettingsJobName] = useState("");
   const [isRefreshingJobs, setIsRefreshingJobs] = useState(false);
+  const [calculatorRunMetres, setCalculatorRunMetres] = useState("");
+  const [calculatorFallMm, setCalculatorFallMm] = useState("");
+  const [calculatorRatio, setCalculatorRatio] = useState("60");
+  const [calculatorRequiredRunMetres, setCalculatorRequiredRunMetres] =
+    useState("");
+  const [calculatorRequiredRatio, setCalculatorRequiredRatio] = useState("60");
+  const [calculatorStartInvert, setCalculatorStartInvert] = useState("");
+  const [calculatorInvertRunMetres, setCalculatorInvertRunMetres] =
+    useState("");
+  const [calculatorInvertRatio, setCalculatorInvertRatio] = useState("60");
   const [selectedTemplate, setSelectedTemplate] = useState("truck");
   const [collapsedSections, setCollapsedSections] = useState({});
   const [operator, setOperator] = useState("");
@@ -2303,6 +2418,77 @@ export default function App() {
     MACHINE_FIELD_LABELS[selectedTemplate] || "Machine ID / Rego";
   const activeRecipientEmail =
     normalizeEmailAddress(recipientEmail) || DEFAULT_EMAIL_RECIPIENT;
+  const fallCalculatorResults = useMemo(() => {
+    const runMetres = parseCalculatorNumber(calculatorRunMetres);
+    const fallMm = parseCalculatorNumber(calculatorFallMm);
+
+    if (!isPositiveNumber(runMetres) || !isPositiveNumber(fallMm)) {
+      return null;
+    }
+
+    const runMm = runMetres * 1000;
+    const gradeDecimal = fallMm / runMm;
+    const ratio = runMm / fallMm;
+    const angle = (Math.atan(gradeDecimal) * 180) / Math.PI;
+
+    return {
+      percent: gradeDecimal * 100,
+      ratio,
+      angle,
+      fallPerMetre: fallMm / runMetres,
+    };
+  }, [calculatorRunMetres, calculatorFallMm]);
+  const ratioCalculatorResults = useMemo(() => {
+    const ratio = parseCalculatorNumber(calculatorRatio);
+
+    if (!isPositiveNumber(ratio)) return null;
+
+    const gradeDecimal = 1 / ratio;
+
+    return {
+      percent: gradeDecimal * 100,
+      angle: (Math.atan(gradeDecimal) * 180) / Math.PI,
+      fallPerMetre: 1000 / ratio,
+    };
+  }, [calculatorRatio]);
+  const requiredFallResults = useMemo(() => {
+    const runMetres = parseCalculatorNumber(calculatorRequiredRunMetres);
+    const ratio = parseCalculatorNumber(calculatorRequiredRatio);
+
+    if (!isPositiveNumber(runMetres) || !isPositiveNumber(ratio)) return null;
+
+    const fallMm = (runMetres * 1000) / ratio;
+
+    return {
+      fallMm,
+      fallMetres: fallMm / 1000,
+      percent: (1 / ratio) * 100,
+    };
+  }, [calculatorRequiredRunMetres, calculatorRequiredRatio]);
+  const invertCalculatorResults = useMemo(() => {
+    const startInvert = parseCalculatorNumber(calculatorStartInvert);
+    const runMetres = parseCalculatorNumber(calculatorInvertRunMetres);
+    const ratio = parseCalculatorNumber(calculatorInvertRatio);
+
+    if (
+      !Number.isFinite(startInvert) ||
+      !isPositiveNumber(runMetres) ||
+      !isPositiveNumber(ratio)
+    ) {
+      return null;
+    }
+
+    const fallMetres = runMetres / ratio;
+
+    return {
+      fallMm: fallMetres * 1000,
+      downstreamInvert: startInvert - fallMetres,
+    };
+  }, [
+    calculatorStartInvert,
+    calculatorInvertRunMetres,
+    calculatorInvertRatio,
+  ]);
   const prestartExpiryWarnings = useMemo(() => {
     const warningDays = appConfig?.expiryWarningDays || 30;
     const dateFields =
@@ -2490,6 +2676,9 @@ export default function App() {
       charge: "chargeup",
       jobinfo: "jobinfo",
       asbuilt: "asbuilt",
+      calculators: "calculators",
+      calculator: "calculators",
+      calcs: "calculators",
       prestart: "prestart",
       incident: "incident",
     };
@@ -2909,6 +3098,25 @@ export default function App() {
       ...currentSections,
       [title]: !currentSections[title],
     }));
+  };
+
+  const applyCalculatorRatioPreset = (ratio) => {
+    const nextRatio = String(ratio);
+
+    setCalculatorRatio(nextRatio);
+    setCalculatorRequiredRatio(nextRatio);
+    setCalculatorInvertRatio(nextRatio);
+  };
+
+  const clearCalculatorFields = () => {
+    setCalculatorRunMetres("");
+    setCalculatorFallMm("");
+    setCalculatorRatio("60");
+    setCalculatorRequiredRunMetres("");
+    setCalculatorRequiredRatio("60");
+    setCalculatorStartInvert("");
+    setCalculatorInvertRunMetres("");
+    setCalculatorInvertRatio("60");
   };
 
   const captureCompressedPhoto = async (fallbackFileName) => {
@@ -7187,6 +7395,305 @@ export default function App() {
             </>
           )}
 
+          {activePage === "calculators" && (
+            <>
+              <View style={styles.pageHeader}>
+                <Text style={styles.pageTitle}>Calculation Tools</Text>
+                <Text style={styles.pageSubtitle}>
+                  Quick grade, fall, ratio, angle, and invert checks.
+                </Text>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.formSectionTitle}>Fall Calculator</Text>
+                <View style={styles.calculatorDiagramCard}>
+                  <CalculatorSlopeIcon />
+                </View>
+
+                <View style={styles.calculatorInputGrid}>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Run / length (m)"
+                      value={calculatorRunMetres}
+                      onChangeText={setCalculatorRunMetres}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Fall / drop (mm)"
+                      value={calculatorFallMm}
+                      onChangeText={setCalculatorFallMm}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.calculatorResultGrid}>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>
+                      Fall Percentage
+                    </Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {fallCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            fallCalculatorResults.percent,
+                            3
+                          )}%`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Fall Ratio</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {fallCalculatorResults
+                        ? `1:${formatCalculatorNumber(
+                            fallCalculatorResults.ratio,
+                            1
+                          )}`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Angle</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {fallCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            fallCalculatorResults.angle,
+                            2
+                          )} deg`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Fall Per Metre</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {fallCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            fallCalculatorResults.fallPerMetre,
+                            1
+                          )} mm/m`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.formSectionTitle}>Ratio Converter</Text>
+                <View style={styles.calculatorPresetRow}>
+                  {COMMON_GRADE_RATIOS.map((ratio) => {
+                    const isSelected =
+                      parseCalculatorNumber(calculatorRatio) === ratio;
+
+                    return (
+                      <Pressable
+                        key={ratio}
+                        style={[
+                          styles.calculatorPresetButton,
+                          isSelected && styles.calculatorPresetButtonSelected,
+                        ]}
+                        onPress={() => applyCalculatorRatioPreset(ratio)}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <Text
+                          style={[
+                            styles.calculatorPresetText,
+                            isSelected && styles.calculatorPresetTextSelected,
+                          ]}
+                        >
+                          1:{ratio}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <StableLabeledInput
+                  label="Ratio 1 in"
+                  value={calculatorRatio}
+                  onChangeText={setCalculatorRatio}
+                  editable={!isSubmitting}
+                  keyboardType="decimal-pad"
+                  commitOnChange
+                />
+
+                <View style={styles.calculatorResultGrid}>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Percentage</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {ratioCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            ratioCalculatorResults.percent,
+                            3
+                          )}%`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Angle</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {ratioCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            ratioCalculatorResults.angle,
+                            2
+                          )} deg`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Fall Per Metre</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {ratioCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            ratioCalculatorResults.fallPerMetre,
+                            1
+                          )} mm/m`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.formSectionTitle}>Required Fall</Text>
+                <View style={styles.calculatorInputGrid}>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Run / length (m)"
+                      value={calculatorRequiredRunMetres}
+                      onChangeText={setCalculatorRequiredRunMetres}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Ratio 1 in"
+                      value={calculatorRequiredRatio}
+                      onChangeText={setCalculatorRequiredRatio}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.calculatorResultGrid}>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Required Fall</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {requiredFallResults
+                        ? `${formatCalculatorNumber(
+                            requiredFallResults.fallMm,
+                            1
+                          )} mm`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Fall In Metres</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {requiredFallResults
+                        ? `${formatCalculatorNumber(
+                            requiredFallResults.fallMetres,
+                            3
+                          )} m`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Percentage</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {requiredFallResults
+                        ? `${formatCalculatorNumber(
+                            requiredFallResults.percent,
+                            3
+                          )}%`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.formSectionTitle}>Invert Level Drop</Text>
+                <StableLabeledInput
+                  label="Start / upstream IL (m)"
+                  value={calculatorStartInvert}
+                  onChangeText={setCalculatorStartInvert}
+                  editable={!isSubmitting}
+                  keyboardType="decimal-pad"
+                  commitOnChange
+                />
+                <View style={styles.calculatorInputGrid}>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Run / length (m)"
+                      value={calculatorInvertRunMetres}
+                      onChangeText={setCalculatorInvertRunMetres}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Ratio 1 in"
+                      value={calculatorInvertRatio}
+                      onChangeText={setCalculatorInvertRatio}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.calculatorResultGrid}>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Fall</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {invertCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            invertCalculatorResults.fallMm,
+                            1
+                          )} mm`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>
+                      Downstream IL
+                    </Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {invertCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            invertCalculatorResults.downstreamInvert,
+                            3
+                          )} m`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <Pressable
+                style={styles.calculatorClearButton}
+                onPress={clearCalculatorFields}
+                disabled={isSubmitting}
+                accessibilityRole="button"
+              >
+                <Text style={styles.secondaryButtonText}>CLEAR CALCULATIONS</Text>
+              </Pressable>
+            </>
+          )}
+
           {activePage === "asbuilt" && (
             <>
               <View style={styles.pageHeader}>
@@ -8018,6 +8525,103 @@ const styles = StyleSheet.create({
 
   optionButtonTextSelected: {
     color: "#000",
+  },
+
+  calculatorDiagramCard: {
+    backgroundColor: "rgba(0,0,0,0.44)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.2)",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginBottom: 16,
+  },
+
+  calculatorInputGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+
+  calculatorInputColumn: {
+    flexGrow: 1,
+    flexBasis: 150,
+  },
+
+  calculatorResultGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 2,
+  },
+
+  calculatorResultCard: {
+    flexGrow: 1,
+    flexBasis: 138,
+    backgroundColor: "#050505",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    paddingHorizontal: 13,
+    paddingVertical: 13,
+    minHeight: 82,
+    justifyContent: "center",
+  },
+
+  calculatorResultLabel: {
+    color: "#bdbdbd",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    marginBottom: 7,
+  },
+
+  calculatorResultValue: {
+    color: "#fff",
+    fontSize: 19,
+    fontWeight: "900",
+  },
+
+  calculatorPresetRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14,
+  },
+
+  calculatorPresetButton: {
+    backgroundColor: "#050505",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.28)",
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+
+  calculatorPresetButtonSelected: {
+    backgroundColor: "#D7FF2F",
+    borderColor: "#D7FF2F",
+  },
+
+  calculatorPresetText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  calculatorPresetTextSelected: {
+    color: "#000",
+  },
+
+  calculatorClearButton: {
+    marginTop: 20,
+    marginHorizontal: 18,
+    borderRadius: 16,
+    paddingVertical: 15,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "#111",
   },
 
   signOnPanel: {
