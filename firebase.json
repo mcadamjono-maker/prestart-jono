@@ -8,11 +8,20 @@
     ],
     "headers": [
       {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
         "source": "/admin.@(html|js|css)",
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-store"
+            "value": "no-cache, no-store, must-revalidate"
           }
         ]
       },
@@ -30,7 +39,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-store"
+            "value": "no-cache, no-store, must-revalidate"
           }
         ]
       }
