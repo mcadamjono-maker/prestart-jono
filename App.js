@@ -197,7 +197,7 @@ const ALLOWED_RECIPIENT_EMAILS = RECIPIENT_EMAIL_OPTIONS.map((email) =>
   email.toLowerCase()
 );
 const COMMON_GRADE_RATIOS = [40, 60, 80, 100, 120];
-const CALCULATOR_EMPTY_RESULT = "Waiting for input above";
+const CALCULATOR_EMPTY_RESULT = "- -";
 
 const parseCalculatorNumber = (value) => {
   if (value === null || value === undefined) return null;
