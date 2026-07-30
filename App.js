@@ -197,7 +197,7 @@ const ALLOWED_RECIPIENT_EMAILS = RECIPIENT_EMAIL_OPTIONS.map((email) =>
   email.toLowerCase()
 );
 const COMMON_GRADE_RATIOS = [40, 60, 80, 100, 120];
-const CALCULATOR_EMPTY_RESULT = "Enter values";
+const CALCULATOR_EMPTY_RESULT = "Waiting for input above";
 
 const parseCalculatorNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -7413,7 +7413,7 @@ export default function App() {
                 <View style={styles.calculatorInputGrid}>
                   <View style={styles.calculatorInputColumn}>
                     <StableLabeledInput
-                      label="Run / length (m)"
+                      label="Input - Run / length (m)"
                       value={calculatorRunMetres}
                       onChangeText={setCalculatorRunMetres}
                       editable={!isSubmitting}
@@ -7423,7 +7423,7 @@ export default function App() {
                   </View>
                   <View style={styles.calculatorInputColumn}>
                     <StableLabeledInput
-                      label="Fall / drop (mm)"
+                      label="Input - Fall / drop (mm)"
                       value={calculatorFallMm}
                       onChangeText={setCalculatorFallMm}
                       editable={!isSubmitting}
@@ -7436,7 +7436,7 @@ export default function App() {
                 <View style={styles.calculatorResultGrid}>
                   <View style={styles.calculatorResultCard}>
                     <Text style={styles.calculatorResultLabel}>
-                      Fall Percentage
+                      Result - Fall Percentage
                     </Text>
                     <Text style={styles.calculatorResultValue}>
                       {fallCalculatorResults
@@ -7448,7 +7448,9 @@ export default function App() {
                     </Text>
                   </View>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Fall Ratio</Text>
+                    <Text style={styles.calculatorResultLabel}>
+                      Result - Fall Ratio
+                    </Text>
                     <Text style={styles.calculatorResultValue}>
                       {fallCalculatorResults
                         ? `1:${formatCalculatorNumber(
@@ -7459,7 +7461,7 @@ export default function App() {
                     </Text>
                   </View>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Angle</Text>
+                    <Text style={styles.calculatorResultLabel}>Result - Angle</Text>
                     <Text style={styles.calculatorResultValue}>
                       {fallCalculatorResults
                         ? `${formatCalculatorNumber(
@@ -7470,7 +7472,9 @@ export default function App() {
                     </Text>
                   </View>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Fall Per Metre</Text>
+                    <Text style={styles.calculatorResultLabel}>
+                      Result - Fall Per Metre
+                    </Text>
                     <Text style={styles.calculatorResultValue}>
                       {fallCalculatorResults
                         ? `${formatCalculatorNumber(
@@ -7515,7 +7519,7 @@ export default function App() {
                 </View>
 
                 <StableLabeledInput
-                  label="Ratio 1 in"
+                  label="Input - Ratio 1 in"
                   value={calculatorRatio}
                   onChangeText={setCalculatorRatio}
                   editable={!isSubmitting}
@@ -7525,7 +7529,9 @@ export default function App() {
 
                 <View style={styles.calculatorResultGrid}>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Percentage</Text>
+                    <Text style={styles.calculatorResultLabel}>
+                      Result - Percentage
+                    </Text>
                     <Text style={styles.calculatorResultValue}>
                       {ratioCalculatorResults
                         ? `${formatCalculatorNumber(
@@ -7536,7 +7542,7 @@ export default function App() {
                     </Text>
                   </View>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Angle</Text>
+                    <Text style={styles.calculatorResultLabel}>Result - Angle</Text>
                     <Text style={styles.calculatorResultValue}>
                       {ratioCalculatorResults
                         ? `${formatCalculatorNumber(
@@ -7547,7 +7553,9 @@ export default function App() {
                     </Text>
                   </View>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Fall Per Metre</Text>
+                    <Text style={styles.calculatorResultLabel}>
+                      Result - Fall Per Metre
+                    </Text>
                     <Text style={styles.calculatorResultValue}>
                       {ratioCalculatorResults
                         ? `${formatCalculatorNumber(
@@ -7565,7 +7573,7 @@ export default function App() {
                 <View style={styles.calculatorInputGrid}>
                   <View style={styles.calculatorInputColumn}>
                     <StableLabeledInput
-                      label="Run / length (m)"
+                      label="Input - Run / length (m)"
                       value={calculatorRequiredRunMetres}
                       onChangeText={setCalculatorRequiredRunMetres}
                       editable={!isSubmitting}
@@ -7575,7 +7583,7 @@ export default function App() {
                   </View>
                   <View style={styles.calculatorInputColumn}>
                     <StableLabeledInput
-                      label="Ratio 1 in"
+                      label="Input - Ratio 1 in"
                       value={calculatorRequiredRatio}
                       onChangeText={setCalculatorRequiredRatio}
                       editable={!isSubmitting}
@@ -7587,7 +7595,9 @@ export default function App() {
 
                 <View style={styles.calculatorResultGrid}>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Required Fall</Text>
+                    <Text style={styles.calculatorResultLabel}>
+                      Result - Required Fall
+                    </Text>
                     <Text style={styles.calculatorResultValue}>
                       {requiredFallResults
                         ? `${formatCalculatorNumber(
@@ -7598,7 +7608,9 @@ export default function App() {
                     </Text>
                   </View>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Fall In Metres</Text>
+                    <Text style={styles.calculatorResultLabel}>
+                      Result - Fall In Metres
+                    </Text>
                     <Text style={styles.calculatorResultValue}>
                       {requiredFallResults
                         ? `${formatCalculatorNumber(
@@ -7609,7 +7621,9 @@ export default function App() {
                     </Text>
                   </View>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Percentage</Text>
+                    <Text style={styles.calculatorResultLabel}>
+                      Result - Percentage
+                    </Text>
                     <Text style={styles.calculatorResultValue}>
                       {requiredFallResults
                         ? `${formatCalculatorNumber(
@@ -7625,7 +7639,7 @@ export default function App() {
               <View style={styles.card}>
                 <Text style={styles.formSectionTitle}>Invert Level Drop</Text>
                 <StableLabeledInput
-                  label="Start / upstream IL (m)"
+                  label="Input - Start / upstream IL (m)"
                   value={calculatorStartInvert}
                   onChangeText={setCalculatorStartInvert}
                   editable={!isSubmitting}
@@ -7635,7 +7649,7 @@ export default function App() {
                 <View style={styles.calculatorInputGrid}>
                   <View style={styles.calculatorInputColumn}>
                     <StableLabeledInput
-                      label="Run / length (m)"
+                      label="Input - Run / length (m)"
                       value={calculatorInvertRunMetres}
                       onChangeText={setCalculatorInvertRunMetres}
                       editable={!isSubmitting}
@@ -7645,7 +7659,7 @@ export default function App() {
                   </View>
                   <View style={styles.calculatorInputColumn}>
                     <StableLabeledInput
-                      label="Ratio 1 in"
+                      label="Input - Ratio 1 in"
                       value={calculatorInvertRatio}
                       onChangeText={setCalculatorInvertRatio}
                       editable={!isSubmitting}
@@ -7657,7 +7671,7 @@ export default function App() {
 
                 <View style={styles.calculatorResultGrid}>
                   <View style={styles.calculatorResultCard}>
-                    <Text style={styles.calculatorResultLabel}>Fall</Text>
+                    <Text style={styles.calculatorResultLabel}>Result - Fall</Text>
                     <Text style={styles.calculatorResultValue}>
                       {invertCalculatorResults
                         ? `${formatCalculatorNumber(
@@ -7669,7 +7683,7 @@ export default function App() {
                   </View>
                   <View style={styles.calculatorResultCard}>
                     <Text style={styles.calculatorResultLabel}>
-                      Downstream IL
+                      Result - Downstream IL
                     </Text>
                     <Text style={styles.calculatorResultValue}>
                       {invertCalculatorResults
@@ -8558,10 +8572,10 @@ const styles = StyleSheet.create({
   calculatorResultCard: {
     flexGrow: 1,
     flexBasis: 138,
-    backgroundColor: "#050505",
+    backgroundColor: "rgba(215,255,47,0.08)",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(215,255,47,0.26)",
     paddingHorizontal: 13,
     paddingVertical: 13,
     minHeight: 82,
@@ -8577,7 +8591,7 @@ const styles = StyleSheet.create({
   },
 
   calculatorResultValue: {
-    color: "#fff",
+    color: "#D7FF2F",
     fontSize: 19,
     fontWeight: "900",
   },
