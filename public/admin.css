@@ -889,6 +889,49 @@ h2 {
   cursor: not-allowed;
 }
 
+.job-progress-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.job-progress-panel h3 {
+  margin: 0;
+  color: var(--accent);
+}
+
+.job-progress-panel p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.progress-list {
+  display: grid;
+  gap: 10px;
+}
+
+.progress-record {
+  border: 1px solid rgba(215, 255, 47, 0.22);
+  border-radius: 16px;
+  padding: 13px 14px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.progress-record h4 {
+  margin: 0 0 8px;
+  color: var(--accent);
+}
+
+.progress-record p {
+  margin: 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
 .job-row {
   display: grid;
   width: 100%;

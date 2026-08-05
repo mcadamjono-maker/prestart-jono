@@ -127,7 +127,7 @@ const CHECKLIST_TEMPLATES = {
 
 const TEMPLATE_TABS = [
   { key: "truck", label: "Truck/Ute" },
-  { key: "digger", label: "Digger/Machinery" },
+  { key: "digger", label: "Digger /\nMachinery" },
   { key: "trailer", label: "Trailer" },
 ];
 
@@ -166,7 +166,7 @@ const APP_TABS = [
   {
     key: "calculators",
     label: "Calculation Tools",
-    description: "Falls, ratios, angles, and invert levels",
+    description: "Falls, volumes, hotmix, and invert levels",
   },
   {
     key: "asbuilt",
@@ -218,6 +218,8 @@ const parseCalculatorNumber = (value) => {
 
 const isPositiveNumber = (value) =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
+const isNonNegativeNumber = (value) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
 
 const formatCalculatorNumber = (value, decimals = 2) => {
   if (!Number.isFinite(value)) return CALCULATOR_EMPTY_RESULT;
@@ -607,6 +609,23 @@ const getTodayDisplayDate = () =>
     month: "2-digit",
     year: "numeric",
   });
+
+const formatNzProgressDateTitle = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(String(value || ""));
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-NZ", {
+    timeZone: "Pacific/Auckland",
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.weekday}, ${values.day}/${values.month}/${values.year}`;
+};
 
 const parseDisplayDateValue = (value) => {
   const cleanedValue = String(value || "").trim();
@@ -2199,6 +2218,23 @@ export default function App() {
   const [calculatorInvertRunMetres, setCalculatorInvertRunMetres] =
     useState("");
   const [calculatorInvertRatio, setCalculatorInvertRatio] = useState("60");
+  const [calculatorConcreteLengthMetres, setCalculatorConcreteLengthMetres] =
+    useState("");
+  const [calculatorConcreteWidthMetres, setCalculatorConcreteWidthMetres] =
+    useState("");
+  const [calculatorConcreteDepthMm, setCalculatorConcreteDepthMm] =
+    useState("");
+  const [calculatorConcreteWastePercent, setCalculatorConcreteWastePercent] =
+    useState("10");
+  const [calculatorHotmixLengthMetres, setCalculatorHotmixLengthMetres] =
+    useState("");
+  const [calculatorHotmixWidthMetres, setCalculatorHotmixWidthMetres] =
+    useState("");
+  const [calculatorHotmixDepthMm, setCalculatorHotmixDepthMm] = useState("");
+  const [calculatorHotmixDensity, setCalculatorHotmixDensity] =
+    useState("2.4");
+  const [calculatorHotmixWastePercent, setCalculatorHotmixWastePercent] =
+    useState("5");
   const [selectedTemplate, setSelectedTemplate] = useState("truck");
   const [collapsedSections, setCollapsedSections] = useState({});
   const [operator, setOperator] = useState("");
@@ -2242,6 +2278,8 @@ export default function App() {
   const [jobInfo, setJobInfo] = useState(null);
   const [isJobInfoLoading, setIsJobInfoLoading] = useState(false);
   const [jobInfoError, setJobInfoError] = useState("");
+  const [jobProgressUpdate, setJobProgressUpdate] = useState("");
+  const [isJobProgressSaving, setIsJobProgressSaving] = useState(false);
   const [selectedVariationJob, setSelectedVariationJob] = useState("");
   const [isVariationJobDropdownOpen, setIsVariationJobDropdownOpen] =
     useState(false);
@@ -2283,6 +2321,8 @@ export default function App() {
   const [hazardSignatureStrokes, setHazardSignatureStrokes] = useState([]);
   const [hazardDraftStatus, setHazardDraftStatus] = useState("");
   const [hazardLastSavedAt, setHazardLastSavedAt] = useState("");
+  const [hasSavedHazardDraftForWeek, setHasSavedHazardDraftForWeek] =
+    useState(false);
   const [isHazardDraftLoading, setIsHazardDraftLoading] = useState(false);
   const [isHazardDraftSaving, setIsHazardDraftSaving] = useState(false);
   const [signaturePadSize, setSignaturePadSize] = useState({
@@ -2488,6 +2528,71 @@ export default function App() {
     calculatorStartInvert,
     calculatorInvertRunMetres,
     calculatorInvertRatio,
+  ]);
+  const concreteCalculatorResults = useMemo(() => {
+    const lengthMetres = parseCalculatorNumber(calculatorConcreteLengthMetres);
+    const widthMetres = parseCalculatorNumber(calculatorConcreteWidthMetres);
+    const depthMm = parseCalculatorNumber(calculatorConcreteDepthMm);
+    const wastePercent =
+      parseCalculatorNumber(calculatorConcreteWastePercent) ?? 0;
+
+    if (
+      !isPositiveNumber(lengthMetres) ||
+      !isPositiveNumber(widthMetres) ||
+      !isPositiveNumber(depthMm) ||
+      !isNonNegativeNumber(wastePercent)
+    ) {
+      return null;
+    }
+
+    const area = lengthMetres * widthMetres;
+    const baseVolume = area * (depthMm / 1000);
+    const orderVolume = baseVolume * (1 + wastePercent / 100);
+
+    return {
+      area,
+      baseVolume,
+      orderVolume,
+      wasteVolume: orderVolume - baseVolume,
+    };
+  }, [
+    calculatorConcreteLengthMetres,
+    calculatorConcreteWidthMetres,
+    calculatorConcreteDepthMm,
+    calculatorConcreteWastePercent,
+  ]);
+  const hotmixCalculatorResults = useMemo(() => {
+    const lengthMetres = parseCalculatorNumber(calculatorHotmixLengthMetres);
+    const widthMetres = parseCalculatorNumber(calculatorHotmixWidthMetres);
+    const depthMm = parseCalculatorNumber(calculatorHotmixDepthMm);
+    const density = parseCalculatorNumber(calculatorHotmixDensity);
+    const wastePercent = parseCalculatorNumber(calculatorHotmixWastePercent) ?? 0;
+
+    if (
+      !isPositiveNumber(lengthMetres) ||
+      !isPositiveNumber(widthMetres) ||
+      !isPositiveNumber(depthMm) ||
+      !isPositiveNumber(density) ||
+      !isNonNegativeNumber(wastePercent)
+    ) {
+      return null;
+    }
+
+    const area = lengthMetres * widthMetres;
+    const compactedVolume = area * (depthMm / 1000);
+    const tonnes = compactedVolume * density * (1 + wastePercent / 100);
+
+    return {
+      area,
+      compactedVolume,
+      tonnes,
+    };
+  }, [
+    calculatorHotmixLengthMetres,
+    calculatorHotmixWidthMetres,
+    calculatorHotmixDepthMm,
+    calculatorHotmixDensity,
+    calculatorHotmixWastePercent,
   ]);
   const prestartExpiryWarnings = useMemo(() => {
     const warningDays = appConfig?.expiryWarningDays || 30;
@@ -3117,6 +3222,15 @@ export default function App() {
     setCalculatorStartInvert("");
     setCalculatorInvertRunMetres("");
     setCalculatorInvertRatio("60");
+    setCalculatorConcreteLengthMetres("");
+    setCalculatorConcreteWidthMetres("");
+    setCalculatorConcreteDepthMm("");
+    setCalculatorConcreteWastePercent("10");
+    setCalculatorHotmixLengthMetres("");
+    setCalculatorHotmixWidthMetres("");
+    setCalculatorHotmixDepthMm("");
+    setCalculatorHotmixDensity("2.4");
+    setCalculatorHotmixWastePercent("5");
   };
 
   const captureCompressedPhoto = async (fallbackFileName) => {
@@ -3292,6 +3406,7 @@ export default function App() {
     setHazardSignatureStrokes([]);
     setHazardDraftStatus(keepJob ? "No saved Hazard ID for this job yet." : "");
     setHazardLastSavedAt("");
+    setHasSavedHazardDraftForWeek(false);
   };
 
   const resetAsBuiltForm = () => {
@@ -3713,7 +3828,6 @@ export default function App() {
       payload.siteAddress ||
         payload.taskDescription ||
         payload.preparedBy ||
-        payload.startDate ||
         payload.risks ||
         payload.extraControls ||
         payload.signOns.length > 0 ||
@@ -3755,6 +3869,7 @@ export default function App() {
     setHasHazardSignOnConfirmed(false);
     setHazardSignatureStrokes([]);
     setHazardLastSavedAt(draft?.submittedAtIso || "");
+    setHasSavedHazardDraftForWeek(true);
     setHazardDraftStatus("Loaded this week's saved Hazard ID.");
     setTimeout(() => {
       isHydratingHazardDraftRef.current = false;
@@ -3800,6 +3915,7 @@ export default function App() {
 
       const savedAt = getSubmittedAt();
       setHazardLastSavedAt(savedAt);
+      setHasSavedHazardDraftForWeek(true);
       setHazardDraftStatus(`Saved for ${payload.jobName}.`);
 
       if (!quiet) {
@@ -3842,6 +3958,7 @@ export default function App() {
     if (!selectedHazardJob || !FIREBASE_HAZARD_ENDPOINT) {
       setHazardDraftStatus("");
       setHazardLastSavedAt("");
+      setHasSavedHazardDraftForWeek(false);
       return;
     }
 
@@ -3851,6 +3968,7 @@ export default function App() {
 
     hazardDraftLoadRef.current = loadId;
     setIsHazardDraftLoading(true);
+    setHasSavedHazardDraftForWeek(false);
     setHazardDraftStatus("Checking for this week's saved Hazard ID...");
 
     const loadHazardDraft = async () => {
@@ -3900,6 +4018,7 @@ export default function App() {
     if (
       activePage !== "hazard" ||
       !selectedHazardJob ||
+      !hasSavedHazardDraftForWeek ||
       isHazardDraftLoading ||
       isHydratingHazardDraftRef.current
     ) {
@@ -3932,6 +4051,7 @@ export default function App() {
     hazardControls,
     hazardExtraControls,
     hazardSignOns,
+    hasSavedHazardDraftForWeek,
     isHazardDraftLoading,
   ]);
 
@@ -3975,8 +4095,61 @@ export default function App() {
   };
 
   useEffect(() => {
+    setJobProgressUpdate("");
     loadSelectedJobInfo();
   }, [selectedInfoJob]);
+
+  const saveJobProgressUpdate = async () => {
+    if (!selectedInfoJob) {
+      Alert.alert("Select Job", "Choose a job before saving an update.");
+      return;
+    }
+
+    const updateText = jobProgressUpdate.trim();
+
+    if (!updateText) {
+      Alert.alert("Progress Update", "Type an update before saving.");
+      return;
+    }
+
+    if (!FIREBASE_JOB_INFO_ENDPOINT) {
+      Alert.alert("Not Configured", "Job information is not configured yet.");
+      return;
+    }
+
+    setIsJobProgressSaving(true);
+
+    try {
+      const response = await fetch(FIREBASE_JOB_INFO_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "addProgressUpdate",
+          jobNumber: selectedInfoJob,
+          jobName: selectedInfoJobOption?.name || "",
+          text: updateText,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to save progress update.");
+      }
+
+      setJobInfo(payload.job || null);
+      setJobProgressUpdate("");
+      Alert.alert("Progress Saved", "The update has been added to this job.");
+    } catch (error) {
+      Alert.alert(
+        "Save Failed",
+        error.message || "Unable to save progress update."
+      );
+    } finally {
+      setIsJobProgressSaving(false);
+    }
+  };
 
   const openJobFile = async (file) => {
     const fileUrl = file?.url;
@@ -4905,6 +5078,13 @@ export default function App() {
     setHazardSignOnName("");
     setHasHazardSignOnConfirmed(false);
     setHazardSignatureStrokes([]);
+
+    if (!hasSavedHazardDraftForWeek) {
+      setHazardDraftStatus(
+        "Sign-on added. Press Save Hazard ID For Week to create this week's saved form."
+      );
+      return;
+    }
 
     saveHazardDraft({
       quiet: true,
@@ -6494,6 +6674,9 @@ export default function App() {
                       styles.tabText,
                       isActive && styles.activeTabText,
                     ]}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
                   >
                     {tab.label}
                   </Text>
@@ -7003,6 +7186,67 @@ export default function App() {
                     </View>
 
                     <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>
+                        Daily Progress Update
+                      </Text>
+                      <TextInput
+                        placeholder="Type today's job progress update..."
+                        placeholderTextColor="#777"
+                        multiline
+                        style={styles.jobProgressInput}
+                        value={jobProgressUpdate}
+                        onChangeText={setJobProgressUpdate}
+                        editable={!isJobProgressSaving}
+                      />
+                      <Pressable
+                        onPress={saveJobProgressUpdate}
+                        disabled={isJobProgressSaving || !jobProgressUpdate.trim()}
+                        style={[
+                          styles.progressSaveButton,
+                          (isJobProgressSaving || !jobProgressUpdate.trim()) &&
+                            styles.disabledControl,
+                        ]}
+                        accessibilityRole="button"
+                      >
+                        {isJobProgressSaving ? (
+                          <ActivityIndicator color="#000" />
+                        ) : (
+                          <Text style={styles.progressSaveButtonText}>
+                            SAVE PROGRESS UPDATE
+                          </Text>
+                        )}
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.jobInfoSection}>
+                      <Text style={styles.formSectionTitle}>
+                        Progress History
+                      </Text>
+                      {jobInfo?.progressUpdates?.length > 0 ? (
+                        jobInfo.progressUpdates.map((update, updateIndex) => (
+                          <View
+                            key={
+                              update.id ||
+                              update.submittedAtIso ||
+                              `progress-${updateIndex}`
+                            }
+                            style={styles.jobProgressCard}
+                          >
+                            <Text style={styles.jobProgressTitle}>
+                              {update.title ||
+                                formatNzProgressDateTitle(update.submittedAtIso)}
+                            </Text>
+                            <Text style={styles.jobInfoText}>{update.text}</Text>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.jobInfoText}>
+                          No progress updates saved for this job yet.
+                        </Text>
+                      )}
+                    </View>
+
+                    <View style={styles.jobInfoSection}>
                       <Text style={styles.formSectionTitle}>Job Files</Text>
                       {jobInfo?.files?.length > 0 ? (
                         jobInfo.files.map((file) => (
@@ -7067,7 +7311,9 @@ export default function App() {
                       {isHazardDraftLoading
                         ? "Loading this job's weekly Hazard ID..."
                         : hazardDraftStatus ||
-                          "This Hazard ID will save against the selected job for the week."}
+                          (hasSavedHazardDraftForWeek
+                            ? "This Hazard ID is saved for the week and will keep updating."
+                            : "Fill out the form, then press Save Hazard ID For Week when you want it to appear on the dashboard.")}
                     </Text>
                     {!!hazardLastSavedAt && (
                       <Text style={styles.hazardDraftMeta}>
@@ -7705,6 +7951,204 @@ export default function App() {
                 </View>
               </View>
 
+              <View style={styles.card}>
+                <Text style={styles.calculatorSectionTitle}>Concrete Volume</Text>
+                <View style={styles.calculatorInputGrid}>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Enter length (m)"
+                      value={calculatorConcreteLengthMetres}
+                      onChangeText={setCalculatorConcreteLengthMetres}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Enter width (m)"
+                      value={calculatorConcreteWidthMetres}
+                      onChangeText={setCalculatorConcreteWidthMetres}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Enter depth (mm)"
+                      value={calculatorConcreteDepthMm}
+                      onChangeText={setCalculatorConcreteDepthMm}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Waste allowance (%)"
+                      value={calculatorConcreteWastePercent}
+                      onChangeText={setCalculatorConcreteWastePercent}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.calculatorResultGrid}>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Area</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {concreteCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            concreteCalculatorResults.area,
+                            2
+                          )} m2`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>
+                      Measured Volume
+                    </Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {concreteCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            concreteCalculatorResults.baseVolume,
+                            3
+                          )} m3`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Order Volume</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {concreteCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            concreteCalculatorResults.orderVolume,
+                            3
+                          )} m3`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Waste Volume</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {concreteCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            concreteCalculatorResults.wasteVolume,
+                            3
+                          )} m3`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.calculatorSectionTitle}>Hotmix Quantity</Text>
+                <View style={styles.calculatorInputGrid}>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Enter length (m)"
+                      value={calculatorHotmixLengthMetres}
+                      onChangeText={setCalculatorHotmixLengthMetres}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Enter width (m)"
+                      value={calculatorHotmixWidthMetres}
+                      onChangeText={setCalculatorHotmixWidthMetres}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Compacted depth (mm)"
+                      value={calculatorHotmixDepthMm}
+                      onChangeText={setCalculatorHotmixDepthMm}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Density (t/m3)"
+                      value={calculatorHotmixDensity}
+                      onChangeText={setCalculatorHotmixDensity}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                  <View style={styles.calculatorInputColumn}>
+                    <StableLabeledInput
+                      label="Waste allowance (%)"
+                      value={calculatorHotmixWastePercent}
+                      onChangeText={setCalculatorHotmixWastePercent}
+                      editable={!isSubmitting}
+                      keyboardType="decimal-pad"
+                      commitOnChange
+                      style={styles.calculatorInput}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.calculatorResultGrid}>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Area</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {hotmixCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            hotmixCalculatorResults.area,
+                            2
+                          )} m2`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>
+                      Compacted Volume
+                    </Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {hotmixCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            hotmixCalculatorResults.compactedVolume,
+                            3
+                          )} m3`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                  <View style={styles.calculatorResultCard}>
+                    <Text style={styles.calculatorResultLabel}>Order Tonnes</Text>
+                    <Text style={styles.calculatorResultValue}>
+                      {hotmixCalculatorResults
+                        ? `${formatCalculatorNumber(
+                            hotmixCalculatorResults.tonnes,
+                            2
+                          )} t`
+                        : CALCULATOR_EMPTY_RESULT}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
               <Pressable
                 style={styles.calculatorClearButton}
                 onPress={clearCalculatorFields}
@@ -8059,9 +8503,12 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     backgroundColor: "#111",
-    paddingVertical: 16,
+    minHeight: 58,
+    paddingHorizontal: 6,
+    paddingVertical: 10,
     borderRadius: 18,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     borderColor: "#2c2c2c",
   },
@@ -8077,8 +8524,10 @@ const styles = StyleSheet.create({
   tabText: {
     color: "#fff",
     fontSize: 15,
+    lineHeight: 18,
     fontWeight: "800",
     textAlign: "center",
+    flexShrink: 1,
   },
 
   card: {
@@ -8151,6 +8600,51 @@ const styles = StyleSheet.create({
     color: "#f5f5f5",
     fontSize: 15,
     lineHeight: 22,
+  },
+
+  jobProgressInput: {
+    backgroundColor: "#050505",
+    color: "#fff",
+    fontSize: 16,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 110,
+    textAlignVertical: "top",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    marginTop: 12,
+  },
+
+  progressSaveButton: {
+    backgroundColor: "#D7FF2F",
+    borderRadius: 16,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+  },
+
+  progressSaveButtonText: {
+    color: "#000",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  jobProgressCard: {
+    backgroundColor: "#050505",
+    borderColor: "rgba(215,255,47,0.18)",
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 10,
+  },
+
+  jobProgressTitle: {
+    color: "#D7FF2F",
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 6,
   },
 
   infoErrorText: {

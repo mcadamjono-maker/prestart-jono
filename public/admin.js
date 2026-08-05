@@ -716,6 +716,29 @@ const renderSelectedJobInfo = () => {
           .join("")
       : '<div class="empty">No files uploaded for this job yet.</div>'
   );
+
+  const progressUpdates = Array.isArray(jobInfo.progressUpdates)
+    ? jobInfo.progressUpdates
+    : [];
+
+  setHtml(
+    "#jobProgressList",
+    selectedJob
+      ? progressUpdates.length > 0
+        ? progressUpdates
+            .map(
+              (update) => `
+                <article class="progress-record">
+                  <h4>${escapeHtml(
+                    update.title || formatDate(update.submittedAtIso)
+                  )}</h4>
+                  <p>${escapeHtml(update.text || "")}</p>
+                </article>`
+            )
+            .join("")
+        : '<div class="empty">No daily progress updates saved for this job yet.</div>'
+      : '<div class="empty">Select a job to view progress updates.</div>'
+  );
 };
 
 const selectJob = async (jobNumber) => {

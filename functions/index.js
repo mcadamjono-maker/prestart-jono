@@ -428,6 +428,25 @@ const publicJobInfo = async (jobRef) => {
   const doc = await jobRef.get();
   const data = doc.data() || {};
   const files = await getJobFiles(jobRef);
+  const progressUpdates = (Array.isArray(data.progressUpdates)
+    ? data.progressUpdates
+    : [])
+    .map((update, index) => {
+      const submittedAtIso = String(update?.submittedAtIso || "").trim();
+      const text = String(update?.text || "").trim();
+
+      return {
+        id: String(update?.id || `${submittedAtIso}-${index}`),
+        title:
+          String(update?.title || "").trim() ||
+          formatNzDateTitle(submittedAtIso),
+        text,
+        submittedAtIso,
+      };
+    })
+    .filter((update) => update.text)
+    .sort((a, b) => b.submittedAtIso.localeCompare(a.submittedAtIso))
+    .slice(0, 100);
 
   return {
     number: data.number || jobRef.id,
@@ -440,8 +459,26 @@ const publicJobInfo = async (jobRef) => {
     accessInfo: data.accessInfo || "",
     otherDetails: data.otherDetails || "",
     updatedAtIso: data.updatedAtIso || "",
+    progressUpdates,
     files,
   };
+};
+
+const formatNzDateTitle = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(String(value || ""));
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-NZ", {
+    timeZone: NZ_TIME_ZONE,
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.weekday}, ${values.day}/${values.month}/${values.year}`;
 };
 
 const titleCaseWords = (value) =>
@@ -1514,6 +1551,17 @@ const buildJobPackHtml = ({ job, jobInfo, reports, openHazards, accessCode }) =>
         </tr>`
     )
     .join("");
+  const progressRows = (jobInfo?.progressUpdates || [])
+    .map(
+      (update) => `
+        <tr>
+          <th>${escapeHtml(
+            update.title || formatNzDateTitle(update.submittedAtIso)
+          )}</th>
+          <td>${escapeHtml(update.text || "")}</td>
+        </tr>`
+    )
+    .join("");
   const attachmentRows = reports
     .flatMap((report) =>
       (report.attachmentSummary || []).map((attachment, index) => ({
@@ -1578,6 +1626,10 @@ const buildJobPackHtml = ({ job, jobInfo, reports, openHazards, accessCode }) =>
               )}</td></tr>`
           )
           .join("")}</table>
+        <h2>Daily Progress Updates</h2>
+        <table>
+          ${progressRows || '<tr><td>No progress updates saved yet.</td></tr>'}
+        </table>
         <h2>Open Hazard IDs</h2>
         <table>
           <tr><th>Job</th><th>Week</th><th>Sign-ons</th><th>Last Saved</th></tr>
@@ -2031,10 +2083,59 @@ exports.jobInfo = onRequest(
       }
 
       if (request.method === "POST") {
-        assertDashboardAccess(request);
-
         const action = String(request.body?.action || "updateInfo");
         const now = new Date();
+
+        if (action === "addProgressUpdate") {
+          const jobDoc = await jobRef.get();
+          const existingJobData = jobDoc.data() || {};
+          const jobName =
+            normaliseJobName(request.body?.jobName) ||
+            normaliseJobName(existingJobData.name);
+
+          if (!jobDoc.exists && !jobName) {
+            response.status(404).json({ error: "Job not found." });
+            return;
+          }
+
+          const text = String(request.body?.text || "")
+            .trim()
+            .slice(0, 3000);
+
+          if (!text) {
+            response.status(400).json({ error: "Progress update is required." });
+            return;
+          }
+
+          const submittedAtIso = now.toISOString();
+          const progressUpdate = {
+            id: `${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+            title: formatNzDateTitle(now),
+            text,
+            submittedAtIso,
+          };
+
+          await jobRef.set(
+            {
+              number: jobNumber,
+              ...(jobName ? { name: jobName } : {}),
+              progressUpdates:
+                admin.firestore.FieldValue.arrayUnion(progressUpdate),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAtIso: submittedAtIso,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          response.status(200).json({
+            ok: true,
+            job: await publicJobInfo(jobRef),
+          });
+          return;
+        }
+
+        assertDashboardAccess(request);
 
         if (action === "updateInfo") {
           const jobName = normaliseJobName(request.body?.name);
