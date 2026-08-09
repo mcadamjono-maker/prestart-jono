@@ -1193,10 +1193,10 @@ const publicHazardDraft = (doc) => {
       task_description: data.taskDescription || "",
       prepared_by: data.preparedBy || "",
       start_date: data.startDate || "",
-      yard_checks: data.yardChecks || {},
-      site_checks: data.siteChecks || {},
+      yard_checks: selectedMapLabels(data.yardChecks || {}),
+      site_checks: selectedMapLabels(data.siteChecks || {}),
       hazards_risks: data.risks || "",
-      controls: data.controls || {},
+      controls_in_place: selectedMapLabels(data.controls || {}),
       extra_controls: data.extraControls || "",
       signed_on_workers: signOns
         .map((signOn, index) => `${index + 1}. ${signOn.name} - ${signOn.signedAt}`)
@@ -1301,6 +1301,11 @@ const buildHazardDraftReportPayload = (hazardDoc) => {
     hazard.siteAddress || hazard.jobName || hazard.jobNumber || "Untitled"
   }`;
   const signedOnWorkers = hazardSignOnSummary(hazard.signOns);
+  const selectedYardChecks = selectedMapLabels(hazard.yardChecks);
+  const selectedSiteChecks = selectedMapLabels(hazard.siteChecks);
+  const selectedControls = selectedMapLabels(hazard.controls);
+  const hazardsRisks = hazard.risks || "Not supplied";
+  const extraControls = hazard.extraControls || "Not supplied";
   const message = buildFiledEmailText({
     title: "Hazard Identification Worksheet",
     reference: hazard.jobName || hazard.jobNumber,
@@ -1320,16 +1325,16 @@ const buildHazardDraftReportPayload = (hazardDoc) => {
       {
         title: "Pre Start Checks",
         rows: [
-          ["At Yard", selectedMapLabels(hazard.yardChecks)],
-          ["At Site", selectedMapLabels(hazard.siteChecks)],
+          ["At Yard", selectedYardChecks],
+          ["At Site", selectedSiteChecks],
         ],
       },
       {
         title: "Hazards and Controls",
         rows: [
-          ["Hazards / Risks", hazard.risks],
-          ["Controls in Place", selectedMapLabels(hazard.controls)],
-          ["Other Controls / Notes", hazard.extraControls],
+          ["Hazards / Risks", hazardsRisks],
+          ["Controls in Place", selectedControls],
+          ["Other Controls / Notes", extraControls],
         ],
       },
       {
@@ -1355,6 +1360,11 @@ const buildHazardDraftReportPayload = (hazardDoc) => {
       task_description: hazard.formData?.taskDescription || "",
       prepared_by: hazard.requestedBy || "",
       start_date: hazard.formData?.startDate || "Not supplied",
+      yard_checks: selectedYardChecks,
+      site_checks: selectedSiteChecks,
+      hazards_risks: hazardsRisks,
+      controls_in_place: selectedControls,
+      extra_controls: extraControls,
       signed_on_workers: signedOnWorkers,
     },
     formData: {
@@ -1365,6 +1375,11 @@ const buildHazardDraftReportPayload = (hazardDoc) => {
       taskDescription: hazard.formData?.taskDescription || "",
       preparedBy: hazard.requestedBy || "",
       startDate: hazard.formData?.startDate || "",
+      yardChecks: hazard.yardChecks || {},
+      siteChecks: hazard.siteChecks || {},
+      risks: hazard.risks || "",
+      controls: hazard.controls || {},
+      extraControls: hazard.extraControls || "",
       signOns: hazard.signOns.map((signOn) => ({
         name: signOn.name,
         signedAt: signOn.signedAt,
