@@ -69,7 +69,7 @@ const escapeHtml = (value) =>
     .replace(/'/g, "&#039;");
 
 const formatDate = (value) => {
-  if (!value) return "Not supplied";
+  if (!value) return "N/A";
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) return value;
@@ -294,7 +294,11 @@ const formatReportValue = (value) => {
       .join("\n");
   }
 
-  return String(value ?? "").trim() || "Not supplied";
+  const cleanedValue = String(value ?? "").trim();
+
+  return cleanedValue && cleanedValue.toLowerCase() !== "not supplied"
+    ? cleanedValue
+    : "N/A";
 };
 
 const signaturePolylineMarkup = (strokes = []) =>
@@ -1049,7 +1053,7 @@ const reportSummaryHtml = (report) => `
     </article>
     <article>
       <span>Job / Site</span>
-      <strong>${escapeHtml(report.jobName || report.siteAddress || report.jobNumber || "Not supplied")}</strong>
+      <strong>${escapeHtml(report.jobName || report.siteAddress || report.jobNumber || "N/A")}</strong>
     </article>
     <article>
       <span>Status</span>
@@ -1108,7 +1112,7 @@ const printableHtml = (report) => `
         <section class="summary">
           <article><span>Report</span><strong>${escapeHtml(report.reportType || "Report")}</strong></article>
           <article><span>Submitted</span><strong>${escapeHtml(formatDate(report.submittedAtIso))}</strong></article>
-          <article><span>Job / Site</span><strong>${escapeHtml(report.jobName || report.siteAddress || report.jobNumber || "Not supplied")}</strong></article>
+          <article><span>Job / Site</span><strong>${escapeHtml(report.jobName || report.siteAddress || report.jobNumber || "N/A")}</strong></article>
           <article><span>Status</span><strong>${escapeHtml(report.status || "Filed")}</strong></article>
         </section>
         <h2>Report Details</h2>

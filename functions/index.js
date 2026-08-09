@@ -530,7 +530,11 @@ const formatReportValue = (value) => {
       .join("\n");
   }
 
-  return String(value ?? "").trim() || "Not supplied";
+  const cleanedValue = String(value ?? "").trim();
+
+  return cleanedValue && cleanedValue.toLowerCase() !== "not supplied"
+    ? cleanedValue
+    : "N/A";
 };
 
 const buildSignaturePolylineMarkup = (strokes = []) =>
@@ -684,7 +688,7 @@ const parseFiledMessage = (message) => {
 
         lastRow = {
           label: rowMatch[1].trim(),
-          value: rowMatch[2].trim() || "Not supplied",
+          value: rowMatch[2].trim() || "N/A",
         };
         currentSection.rows.push(lastRow);
         return;
@@ -1240,10 +1244,10 @@ const getSubmittedAtNz = (date = new Date()) =>
     timeStyle: "short",
   }).format(date);
 
-const formatReportTextValue = (value, fallback = "Not supplied") => {
+const formatReportTextValue = (value, fallback = "N/A") => {
   const formatted = formatReportValue(value);
 
-  return formatted && formatted !== "Not supplied" ? formatted : fallback;
+  return formatted && formatted !== "N/A" ? formatted : fallback;
 };
 
 const formatReportTextRow = ([label, value]) => {
@@ -1304,8 +1308,8 @@ const buildHazardDraftReportPayload = (hazardDoc) => {
   const selectedYardChecks = selectedMapLabels(hazard.yardChecks);
   const selectedSiteChecks = selectedMapLabels(hazard.siteChecks);
   const selectedControls = selectedMapLabels(hazard.controls);
-  const hazardsRisks = hazard.risks || "Not supplied";
-  const extraControls = hazard.extraControls || "Not supplied";
+  const hazardsRisks = hazard.risks || "N/A";
+  const extraControls = hazard.extraControls || "N/A";
   const message = buildFiledEmailText({
     title: "Hazard Identification Worksheet",
     reference: hazard.jobName || hazard.jobNumber,
@@ -1359,7 +1363,7 @@ const buildHazardDraftReportPayload = (hazardDoc) => {
       site_address: hazard.siteAddress || "",
       task_description: hazard.formData?.taskDescription || "",
       prepared_by: hazard.requestedBy || "",
-      start_date: hazard.formData?.startDate || "Not supplied",
+      start_date: hazard.formData?.startDate || "N/A",
       yard_checks: selectedYardChecks,
       site_checks: selectedSiteChecks,
       hazards_risks: hazardsRisks,
@@ -1637,7 +1641,7 @@ const buildJobPackHtml = ({ job, jobInfo, reports, openHazards, accessCode }) =>
           .map(
             ([label, value]) =>
               `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(
-                formatReportValue(value || "Not supplied")
+                formatReportValue(value || "N/A")
               )}</td></tr>`
           )
           .join("")}</table>

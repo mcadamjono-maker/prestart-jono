@@ -713,10 +713,12 @@ const getCurrentWeekStartIso = () => {
   return addDaysToIsoDate(nzDate, diffToMonday);
 };
 
-const formatFieldValue = (value, fallback = "Not supplied") => {
-  const cleanedValue = String(value || "").trim();
+const formatFieldValue = (value, fallback = "N/A") => {
+  const cleanedValue = String(value ?? "").trim();
 
-  return cleanedValue || fallback;
+  return cleanedValue && cleanedValue.toLowerCase() !== "not supplied"
+    ? cleanedValue
+    : fallback;
 };
 
 const formatReportRow = ([label, value]) => {
@@ -1211,25 +1213,25 @@ const buildAsBuiltSvg = ({
   <rect width="100" height="118" fill="#ffffff" />
   <text x="4" y="6" font-family="Arial, sans-serif" font-size="4.5" font-weight="700" fill="#111111">Williams Drainage Limited - As-Built Plan</text>
   <text x="4" y="11" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Address: ${escapeXml(
-    address || "Not supplied"
+    address || "N/A"
   )}</text>
   <text x="4" y="15" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Owner: ${escapeXml(
-    owner || "Not supplied"
-  )} | Lot: ${escapeXml(lotNumber || "Not supplied")} | DPS: ${escapeXml(
-    dpsNumber || "Not supplied"
+    owner || "N/A"
+  )} | Lot: ${escapeXml(lotNumber || "N/A")} | DPS: ${escapeXml(
+    dpsNumber || "N/A"
   )}</text>
   <text x="4" y="19" font-family="Arial, sans-serif" font-size="2.6" fill="#333333">Submitted: ${escapeXml(
     getSubmittedAt()
   )}</text>
   <text x="4" y="23" font-family="Arial, sans-serif" font-size="2.3" fill="#333333">Building Consent: ${escapeXml(
-    buildingConsentNumber || "Not supplied"
+    buildingConsentNumber || "N/A"
   )} | Inspection Date: ${escapeXml(
-    inspectionDate || "Not supplied"
-  )} | Inspector: ${escapeXml(inspector || "Not supplied")}</text>
+    inspectionDate || "N/A"
+  )} | Inspector: ${escapeXml(inspector || "N/A")}</text>
   <text x="4" y="26.5" font-family="Arial, sans-serif" font-size="2.3" fill="#333333">Drainlayer: ${escapeXml(
-    drainlayer || "Not supplied"
+    drainlayer || "N/A"
   )} | Drainage License#: ${escapeXml(
-    drainageLicenseNumber || "Not supplied"
+    drainageLicenseNumber || "N/A"
   )}</text>
   ${
     mapUrl
@@ -1368,7 +1370,7 @@ const buildAsBuiltPdfHtml = ({
           : `
             <div class="field">
               <span>${escapeXml(label)}</span>
-              <strong>${escapeXml(value || "Not supplied")}</strong>
+              <strong>${escapeXml(value || "N/A")}</strong>
             </div>`
     )
     .join("");
@@ -5236,16 +5238,16 @@ export default function App() {
           report_type: "As-Built Plan",
           template: "as_built",
           address: asBuiltAddress.trim(),
-          owner: asBuiltOwner.trim() || "Not supplied",
-          lot_number: asBuiltLotNumber.trim() || "Not supplied",
-          dps_number: asBuiltDpsNumber.trim() || "Not supplied",
+          owner: asBuiltOwner.trim() || "N/A",
+          lot_number: asBuiltLotNumber.trim() || "N/A",
+          dps_number: asBuiltDpsNumber.trim() || "N/A",
           building_consent_number:
-            asBuiltBuildingConsentNumber.trim() || "Not supplied",
-          inspection_date: asBuiltInspectionDate.trim() || "Not supplied",
-          inspector: asBuiltInspector.trim() || "Not supplied",
+            asBuiltBuildingConsentNumber.trim() || "N/A",
+          inspection_date: asBuiltInspectionDate.trim() || "N/A",
+          inspector: asBuiltInspector.trim() || "N/A",
           drainlayer: asBuiltDrainlayer.trim(),
           drainage_license_number:
-            asBuiltDrainageLicenseNumber.trim() || "Not supplied",
+            asBuiltDrainageLicenseNumber.trim() || "N/A",
           drainlayer_signature: "Drawn signature attached",
           notes: asBuiltNotes.trim() || "None",
         },
@@ -5476,11 +5478,11 @@ export default function App() {
         report_type: "Incident Report",
         template: "incident",
         incident_reporter: incidentReporter.trim(),
-        incident_date: incidentDate.trim() || "Not supplied",
-        incident_location: incidentLocation.trim() || "Not supplied",
-        incident_machine: incidentMachine.trim() || "Not supplied",
+        incident_date: incidentDate.trim() || "N/A",
+        incident_location: incidentLocation.trim() || "N/A",
+        incident_machine: incidentMachine.trim() || "N/A",
         incident_description: incidentDescription.trim(),
-        incident_action: incidentAction.trim() || "Not supplied",
+        incident_action: incidentAction.trim() || "N/A",
         operator: incidentReporter.trim(),
         machine: incidentMachine.trim(),
         notes: incidentDescription.trim(),
@@ -5644,19 +5646,19 @@ export default function App() {
         template: "charge_up",
         job_number: selectedChargeJob,
         job_name: selectedChargeJobOption?.name || "",
-        date: chargeDate.trim() || "Not supplied",
+        date: chargeDate.trim() || "N/A",
         entered_by: chargeEnteredBy.trim(),
-        people_on_site: chargeWorkers.trim() || "Not supplied",
-        hours: chargeHours.trim() || "Not supplied",
-        equipment_used: chargeEquipment.trim() || "Not supplied",
-        materials_used: chargeMaterials.trim() || "Not supplied",
-        notes: chargeNotes.trim() || "Not supplied",
+        people_on_site: chargeWorkers.trim() || "N/A",
+        hours: chargeHours.trim() || "N/A",
+        equipment_used: chargeEquipment.trim() || "N/A",
+        materials_used: chargeMaterials.trim() || "N/A",
+        notes: chargeNotes.trim() || "N/A",
         operator: chargeEnteredBy.trim(),
         machine: selectedChargeJob,
-        answers: `People: ${chargeWorkers.trim() || "Not supplied"}\nHours: ${
-          chargeHours.trim() || "Not supplied"
-        }\nEquipment: ${chargeEquipment.trim() || "Not supplied"}\nMaterials: ${
-          chargeMaterials.trim() || "Not supplied"
+        answers: `People: ${chargeWorkers.trim() || "N/A"}\nHours: ${
+          chargeHours.trim() || "N/A"
+        }\nEquipment: ${chargeEquipment.trim() || "N/A"}\nMaterials: ${
+          chargeMaterials.trim() || "N/A"
         }`,
         photoName:
           chargePhotos.length > 0
@@ -5782,12 +5784,12 @@ export default function App() {
         job_name: selectedPurchaseJobOption?.name || "",
         requested_by: poRequester.trim(),
         supplier: poSupplier.trim(),
-        purchase_details: poDetails.trim() || "Not supplied",
+        purchase_details: poDetails.trim() || "N/A",
         operator: poRequester.trim(),
         machine: selectedPurchaseJob,
         notes: poDetails.trim(),
         answers: `Job Number: ${selectedPurchaseJob}\nJob Name: ${
-          selectedPurchaseJobOption?.name || "Not supplied"
+          selectedPurchaseJobOption?.name || "N/A"
         }\nSupplier: ${poSupplier.trim()}`,
         email_body: message,
       };
@@ -5914,8 +5916,8 @@ export default function App() {
         job_number: selectedVariationJob,
         job_name: selectedVariationJobOption?.name || "",
         requested_by: variationRequestedBy.trim(),
-        variation_number: variationNumber.trim() || "Not supplied",
-        site_address: variationSiteAddress.trim() || "Not supplied",
+        variation_number: variationNumber.trim() || "N/A",
+        site_address: variationSiteAddress.trim() || "N/A",
         description: variationDescription.trim(),
         reasons: selectedReasons,
         photos:
