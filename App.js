@@ -2129,8 +2129,8 @@ const StablePhotoPreviewList = ({ photoList, onChangeCaption }) => {
 const StableSignatureInk = ({ strokes, small = false }) => (
   <Svg
     style={styles.signatureCanvas}
-    viewBox="0 0 100 100"
-    preserveAspectRatio="none"
+    viewBox={small ? "-8 -8 116 116" : "0 0 100 100"}
+    preserveAspectRatio={small ? "xMidYMid meet" : "none"}
     pointerEvents="none"
   >
     {strokes.map((stroke, strokeIndex) =>
@@ -2140,7 +2140,7 @@ const StableSignatureInk = ({ strokes, small = false }) => (
           points={stroke.map((point) => `${point.x},${point.y}`).join(" ")}
           fill="none"
           stroke="#111"
-          strokeWidth={small ? 3.2 : 2.4}
+          strokeWidth={small ? 2.8 : 2.4}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -2318,6 +2318,10 @@ export default function App() {
   const [hazardSignOns, setHazardSignOns] = useState([]);
   const [isHazardSignOnOpen, setIsHazardSignOnOpen] = useState(false);
   const [hazardSignOnName, setHazardSignOnName] = useState("");
+  const [hazardSignOnCompleteName, setHazardSignOnCompleteName] =
+    useState("");
+  const [isHazardSignOnCompleteOpen, setIsHazardSignOnCompleteOpen] =
+    useState(false);
   const [hasHazardSignOnConfirmed, setHasHazardSignOnConfirmed] =
     useState(false);
   const [hazardSignatureStrokes, setHazardSignatureStrokes] = useState([]);
@@ -4243,6 +4247,66 @@ export default function App() {
   const getSignaturePointCount = (signatureStrokes) =>
     signatureStrokes.reduce((total, stroke) => total + stroke.length, 0);
 
+  const resolveWebDomNode = (nodeOrRef) => {
+    if (!IS_WEB || !nodeOrRef) return null;
+
+    const node = nodeOrRef.current || nodeOrRef;
+
+    if (node?.getBoundingClientRect) return node;
+
+    const innerNode = node?.getNode?.();
+
+    return innerNode?.getBoundingClientRect ? innerNode : null;
+  };
+
+  const getWebSignaturePoint = (event, touchSource = null, padRef = null) => {
+    if (!IS_WEB) return null;
+
+    const nativeEvent = event?.nativeEvent || {};
+    const targetNode =
+      resolveWebDomNode(event?.currentTarget) ||
+      resolveWebDomNode(nativeEvent.currentTarget) ||
+      resolveWebDomNode(event?.target?.closest?.("[data-wdl-signature-pad='true']")) ||
+      resolveWebDomNode(nativeEvent.target?.closest?.("[data-wdl-signature-pad='true']")) ||
+      resolveWebDomNode(event?.target) ||
+      resolveWebDomNode(nativeEvent.target) ||
+      resolveWebDomNode(padRef);
+    const rect = targetNode?.getBoundingClientRect?.();
+
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+
+    const scrollX =
+      typeof window !== "undefined" ? Number(window.scrollX || 0) : 0;
+    const scrollY =
+      typeof window !== "undefined" ? Number(window.scrollY || 0) : 0;
+    const clientX = Number(
+      touchSource?.clientX ??
+        nativeEvent.clientX ??
+        (Number.isFinite(Number(touchSource?.pageX ?? nativeEvent.pageX))
+          ? Number(touchSource?.pageX ?? nativeEvent.pageX) - scrollX
+          : NaN)
+    );
+    const clientY = Number(
+      touchSource?.clientY ??
+        nativeEvent.clientY ??
+        (Number.isFinite(Number(touchSource?.pageY ?? nativeEvent.pageY))
+          ? Number(touchSource?.pageY ?? nativeEvent.pageY) - scrollY
+          : NaN)
+    );
+
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+
+    const x = ((clientX - rect.left) / rect.width) * 100;
+    const y = ((clientY - rect.top) / rect.height) * 100;
+
+    if (x < -2 || x > 102 || y < -2 || y > 102) return null;
+
+    return {
+      x: Math.max(0, Math.min(100, x)),
+      y: Math.max(0, Math.min(100, y)),
+    };
+  };
+
   const blockWebTouchEvent = (event) => {
     if (!IS_WEB) return;
 
@@ -4358,10 +4422,12 @@ export default function App() {
   };
 
   const getSignaturePoint = (event, touchSource = null) =>
-    getPercentPoint(
-      getEventLocation(event, signaturePadSize, touchSource),
-      signaturePadSize
-    );
+    IS_WEB
+      ? getWebSignaturePoint(event, touchSource, hazardSignaturePadRef)
+      : getPercentPoint(
+          getEventLocation(event, signaturePadSize, touchSource),
+          signaturePadSize
+        );
 
   const getAsBuiltPoint = (event) => {
     return getPercentPoint(
@@ -4485,10 +4551,12 @@ export default function App() {
   };
 
   const getAsBuiltSignaturePoint = (event, touchSource = null) =>
-    getPercentPoint(
-      getEventLocation(event, asBuiltSignaturePadSize, touchSource),
-      asBuiltSignaturePadSize
-    );
+    IS_WEB
+      ? getWebSignaturePoint(event, touchSource, asBuiltSignaturePadRef)
+      : getPercentPoint(
+          getEventLocation(event, asBuiltSignaturePadSize, touchSource),
+          asBuiltSignaturePadSize
+        );
 
   const getPrimaryWebTouchSource = (event) => {
     const nativeEvent = event?.nativeEvent || event || {};
@@ -4533,7 +4601,7 @@ export default function App() {
     pointerId = "touch",
   }) => {
     if (!IS_WEB || isSubmitting) return;
-    if (pointerId === "touch" && pointerRef.current !== null) return;
+    if (pointerRef.current !== null) return;
 
     blockWebTouchEvent(event);
     const point = getPoint(event, getPrimaryWebTouchSource(event));
@@ -4676,18 +4744,6 @@ export default function App() {
   useEffect(() => {
     if (!IS_WEB) return undefined;
 
-    const resolveDomNode = (ref) => {
-      const node = ref.current;
-
-      if (node?.addEventListener) return node;
-
-      const innerNode = node?.getNode?.();
-
-      if (innerNode?.addEventListener) return innerNode;
-
-      return null;
-    };
-
     const bindTouchSignaturePad = ({
       ref,
       pointerRef,
@@ -4695,9 +4751,14 @@ export default function App() {
       setStrokes,
       setDrawing,
     }) => {
-      const node = resolveDomNode(ref);
+      const node = resolveWebDomNode(ref);
 
       if (!node) return () => {};
+
+      node.style.touchAction = "none";
+      node.style.overscrollBehavior = "contain";
+      node.style.userSelect = "none";
+      node.style.webkitUserSelect = "none";
 
       const onTouchStart = (event) =>
         startWebSignatureStroke({
@@ -5050,7 +5111,7 @@ export default function App() {
 
   const confirmHazardSignOn = () => {
     if (!hazardSignOnName.trim()) {
-      Alert.alert("Validation", "Please enter the worker name.");
+      Alert.alert("Validation", "Please enter the name.");
       return;
     }
 
@@ -5080,6 +5141,8 @@ export default function App() {
     setHazardSignOnName("");
     setHasHazardSignOnConfirmed(false);
     setHazardSignatureStrokes([]);
+    setHazardSignOnCompleteName(newSignOn.name);
+    setIsHazardSignOnCompleteOpen(true);
 
     if (!hasSavedHazardDraftForWeek) {
       setHazardDraftStatus(
@@ -7546,7 +7609,10 @@ export default function App() {
                     <View
                       ref={hazardSignaturePadRef}
                       style={styles.signaturePad}
-                      dataSet={{ wdlTouchLock: "true" }}
+                      dataSet={{
+                        wdlSignaturePad: "true",
+                        wdlTouchLock: "true",
+                      }}
                       onLayout={(event) => {
                         const { width, height } = event.nativeEvent.layout;
 
@@ -8300,7 +8366,10 @@ export default function App() {
                 <View
                   ref={asBuiltSignaturePadRef}
                   style={styles.signaturePad}
-                  dataSet={{ wdlTouchLock: "true" }}
+                  dataSet={{
+                    wdlSignaturePad: "true",
+                    wdlTouchLock: "true",
+                  }}
                   onLayout={(event) => {
                     const { width, height } = event.nativeEvent.layout;
 
@@ -8371,6 +8440,51 @@ export default function App() {
             </Pressable>
           )}
             </ScrollView>
+            <Modal
+              animationType="fade"
+              transparent
+              visible={isHazardSignOnCompleteOpen}
+              onRequestClose={() => {
+                setIsHazardSignOnCompleteOpen(false);
+                setIsHazardSignOnOpen(false);
+              }}
+            >
+              <View style={styles.signOnCompleteBackdrop}>
+                <View style={styles.signOnCompleteCard}>
+                  <Text style={styles.signOnCompleteTitle}>
+                    Sign On Completed
+                  </Text>
+                  <Text style={styles.signOnCompleteMessage}>
+                    {hazardSignOnCompleteName || "This person"} has been signed
+                    on to the Hazard ID.
+                  </Text>
+                  <Pressable
+                    style={styles.signOnCompletePrimary}
+                    onPress={() => {
+                      setIsHazardSignOnCompleteOpen(false);
+                      setIsHazardSignOnOpen(true);
+                    }}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.signOnCompletePrimaryText}>
+                      SIGN ON SOMEONE ELSE
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.signOnCompleteSecondary}
+                    onPress={() => {
+                      setIsHazardSignOnCompleteOpen(false);
+                      setIsHazardSignOnOpen(false);
+                    }}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.signOnCompleteSecondaryText}>
+                      BACK TO HAZARD ID
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </Modal>
             {activePage === "menu" && (
               <Pressable
                 style={styles.settingsFloatingButton}
@@ -8455,6 +8569,64 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
     marginTop: 6,
+  },
+
+  signOnCompleteBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    backgroundColor: "rgba(0,0,0,0.72)",
+  },
+
+  signOnCompleteCard: {
+    backgroundColor: "rgba(8,8,8,0.96)",
+    borderRadius: 24,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.42)",
+  },
+
+  signOnCompleteTitle: {
+    color: "#D7FF2F",
+    fontSize: 24,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+
+  signOnCompleteMessage: {
+    color: "#fff",
+    fontSize: 17,
+    lineHeight: 24,
+    marginBottom: 18,
+  },
+
+  signOnCompletePrimary: {
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: "center",
+    backgroundColor: "#D7FF2F",
+    marginBottom: 10,
+  },
+
+  signOnCompletePrimaryText: {
+    color: "#000",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  signOnCompleteSecondary: {
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+    backgroundColor: "#111",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+
+  signOnCompleteSecondaryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "900",
   },
 
   settingsFloatingButton: {
@@ -9256,8 +9428,8 @@ const styles = StyleSheet.create({
   },
 
   signaturePreviewSmall: {
-    width: 150,
-    height: 58,
+    width: 170,
+    height: 76,
     marginBottom: 0,
   },
 

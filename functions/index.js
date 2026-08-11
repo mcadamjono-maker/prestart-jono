@@ -1605,7 +1605,7 @@ const buildJobPackHtml = ({ job, jobInfo, reports, openHazards, accessCode }) =>
 <html lang="en-NZ">
   <head>
     <meta charset="utf-8" />
-    <title>${escapeHtml(jobTitle)} Job Pack</title>
+    <title>${escapeHtml(jobTitle)} Job Overview Report</title>
     <style>
       * { box-sizing: border-box; }
       body { margin: 0; background: #f3f5f0; color: #101010; font-family: Arial, sans-serif; }
@@ -1631,8 +1631,9 @@ const buildJobPackHtml = ({ job, jobInfo, reports, openHazards, accessCode }) =>
     <div class="page">
       <header>
         <p class="eyebrow">Williams Drainage Limited</p>
-        <h1>${escapeHtml(jobTitle)}</h1>
-        <p>Job pack generated ${escapeHtml(formatNzDateTime(new Date()))}</p>
+        <h1>Job Overview Report</h1>
+        <p>${escapeHtml(jobTitle)}</p>
+        <p>Generated ${escapeHtml(formatNzDateTime(new Date()))}</p>
       </header>
       <div class="print-actions"><button onclick="window.print()">Print / Save PDF</button></div>
       <main>

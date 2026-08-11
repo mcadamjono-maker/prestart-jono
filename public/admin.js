@@ -3,7 +3,6 @@ const DASHBOARD_ENDPOINT =
 const JOB_INFO_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const ACCESS_CODE_KEY = "wdl-dashboard-access-code";
-const WEB_APP_URL = "https://wdl-field-forms.web.app";
 const CALENDAR_REFRESH_MS = 10000;
 const REPORT_STATUSES = ["New", "Reviewed", "Needs Action", "Filed", "Archived"];
 let calendarRefreshTimer = null;
@@ -214,12 +213,6 @@ const textToSections = (value) => {
     });
 
   return sections.filter((section) => section.title && section.items.length);
-};
-
-const jobActionUrl = (jobNumber, action = "today") => {
-  const params = new URLSearchParams({ job: jobNumber, action });
-
-  return `${WEB_APP_URL}/?${params.toString()}`;
 };
 
 const dashboardUrl = (params) => {
@@ -641,42 +634,14 @@ const renderSelectedJobInfo = () => {
     selectedJob
       ? `
         <article class="shortcut-card">
-          <h4>Job Pack</h4>
-          <p>Print or save all job info, files, reports, and open Hazard IDs.</p>
+          <h4>Job Overview Report</h4>
+          <p>Open, print, or save all job info, files, reports, and open Hazard IDs.</p>
           <div class="shortcut-actions">
             <a class="job-pack-button" href="${escapeHtml(
               dashboardUrl({ resource: "jobPack", jobNumber: selectedJob.number })
-            )}" target="_blank" rel="noreferrer">Open Job Pack</a>
+            )}" target="_blank" rel="noreferrer">Open Job Overview Report</a>
           </div>
-        </article>
-        ${[
-          ["hazard", "Hazard ID"],
-          ["chargeup", "Charge Up"],
-          ["jobinfo", "Job Info"],
-          ["asbuilt", "As-Built"],
-        ]
-          .map(
-            ([action, label]) => `
-            <article class="shortcut-card">
-              <h4>${escapeHtml(label)}</h4>
-              <img src="${escapeHtml(
-                dashboardUrl({
-                  resource: "jobQr",
-                  jobNumber: selectedJob.number,
-                  action,
-                })
-              )}" alt="${escapeHtml(label)} QR code" />
-              <div class="shortcut-actions">
-                <a href="${escapeHtml(
-                  jobActionUrl(selectedJob.number, action)
-                )}" target="_blank" rel="noreferrer">Open Link</a>
-                <button type="button" data-copy-link="${escapeHtml(
-                  jobActionUrl(selectedJob.number, action)
-                )}">Copy</button>
-              </div>
-            </article>`
-          )
-          .join("")}`
+        </article>`
       : ""
   );
 
@@ -894,18 +859,6 @@ const deleteReport = async (reportId) => {
   renderReports();
   renderMetrics();
   renderOpenHazards();
-};
-
-const copyLink = async (link) => {
-  if (!link) return;
-
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(link);
-    alert("Link copied.");
-    return;
-  }
-
-  window.prompt("Copy this link", link);
 };
 
 const fileToBase64 = (file) =>
@@ -1469,7 +1422,6 @@ const init = () => {
     const selectJobNumber = event.target.closest("[data-select-job]")?.dataset.selectJob;
     const deleteFileId = event.target.closest("[data-delete-file]")?.dataset.deleteFile;
     const completeJobButton = event.target.closest("[data-complete-job]");
-    const copyLinkButton = event.target.closest("[data-copy-link]");
 
     if (openReportId) openReport(openReportId);
     if (archiveReportId) {
@@ -1484,7 +1436,6 @@ const init = () => {
     if (deleteHazardId) deleteOpenHazard(deleteHazardId).catch((error) => alert(error.message));
     if (selectJobNumber) selectJob(selectJobNumber).catch((error) => alert(error.message));
     if (deleteFileId) deleteJobFile(deleteFileId).catch((error) => alert(error.message));
-    if (copyLinkButton) copyLink(copyLinkButton.dataset.copyLink).catch((error) => alert(error.message));
     if (event.target.closest("#toggleCompletedJobs")) toggleCompletedJobs();
     if (completeJobButton) {
       const jobNumber = completeJobButton.dataset.completeJob;
