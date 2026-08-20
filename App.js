@@ -410,8 +410,37 @@ const HAZARD_CONTROL_OPTIONS = [
   "Supervision arranged for inexperienced workers",
 ];
 
-const formatJobNumber = (value) =>
-  String(value || "").replace(/\D/g, "").slice(0, 4).padStart(4, "0");
+const formatJobNumber = (value) => {
+  const rawValue = String(value || "").trim().toUpperCase();
+
+  if (/^(TBA|TMP)-[A-Z0-9]{3,12}$/.test(rawValue)) {
+    return rawValue.slice(0, 16);
+  }
+
+  const digits = rawValue.replace(/\D/g, "");
+
+  if (digits) return digits.slice(0, 4).padStart(4, "0");
+
+  return "";
+};
+
+const isValidJobNumber = (value) =>
+  /^\d{4}$/.test(String(value || "")) ||
+  /^(TBA|TMP)-[A-Z0-9]{3,12}$/.test(String(value || ""));
+
+const normalizeJobStatus = (status, completed = false) => {
+  const cleanedStatus = String(status || "").trim().toLowerCase();
+
+  if (cleanedStatus === "on hold" || cleanedStatus === "on-hold") {
+    return "on hold";
+  }
+
+  if (cleanedStatus === "completed" || completed) {
+    return "completed";
+  }
+
+  return "active";
+};
 
 const parseCsvLine = (line) => {
   const cells = [];
@@ -483,10 +512,11 @@ const normalizeJobOptions = (jobs) => {
       return {
         number: formatJobNumber(job.number),
         name: String(job.name || "").trim(),
-        completed: Boolean(job.completed),
+        status: normalizeJobStatus(job.status, job.completed),
+        completed: normalizeJobStatus(job.status, job.completed) === "completed",
       };
     })
-    .filter((job) => job.number.length === 4 && job.name && !job.completed)
+    .filter((job) => isValidJobNumber(job.number) && job.name && !job.completed)
     .sort((firstJob, secondJob) => firstJob.name.localeCompare(secondJob.name));
 };
 
@@ -3054,11 +3084,12 @@ export default function App() {
   };
 
   const addSettingsJob = async () => {
-    const digits = String(settingsJobNumber || "").replace(/\D/g, "");
+    const rawJobNumber = String(settingsJobNumber || "").trim();
+    const jobNumber = formatJobNumber(rawJobNumber);
     const jobName = settingsJobName.trim();
 
-    if (!digits) {
-      Alert.alert("Job Number Needed", "Please enter the job number.");
+    if (rawJobNumber && !jobNumber) {
+      Alert.alert("Job Number Error", "Enter a 4 digit job number or leave it blank.");
       return;
     }
 
@@ -3066,8 +3097,6 @@ export default function App() {
       Alert.alert("Job Name Needed", "Please enter the job name.");
       return;
     }
-
-    const jobNumber = digits.slice(0, 4).padStart(4, "0");
 
     setIsRefreshingJobs(true);
 
@@ -3089,7 +3118,7 @@ export default function App() {
       }
 
       const savedJob = normalizeJobOptions([payload.job])[0] || {
-        number: jobNumber,
+        number: jobNumber || payload.job?.number || "",
         name: jobName,
       };
 
@@ -3237,6 +3266,7 @@ export default function App() {
     setCalculatorHotmixDepthMm("");
     setCalculatorHotmixDensity("2.4");
     setCalculatorHotmixWastePercent("5");
+    Alert.alert("Calculator Cleared", "The calculator fields have been reset.");
   };
 
   const captureCompressedPhoto = async (fallbackFileName) => {
@@ -3299,6 +3329,7 @@ export default function App() {
 
     if (capturedPhoto) {
       setPhotos((currentPhotos) => [...currentPhotos, capturedPhoto]);
+      Alert.alert("Photo Added", "The fault photo has been added.");
     }
   };
 
@@ -3307,6 +3338,7 @@ export default function App() {
 
     if (capturedPhoto) {
       setIncidentPhotos((currentPhotos) => [...currentPhotos, capturedPhoto]);
+      Alert.alert("Photo Added", "The incident photo has been added.");
     }
   };
 
@@ -3315,6 +3347,7 @@ export default function App() {
 
     if (capturedPhoto) {
       setChargePhotos((currentPhotos) => [...currentPhotos, capturedPhoto]);
+      Alert.alert("Photo Added", "The charge up photo has been added.");
     }
   };
 
@@ -3323,6 +3356,7 @@ export default function App() {
 
     if (capturedPhoto) {
       setVariationPhotos((currentPhotos) => [...currentPhotos, capturedPhoto]);
+      Alert.alert("Photo Added", "The job variation photo has been added.");
     }
   };
 
@@ -3456,6 +3490,32 @@ export default function App() {
     error instanceof EmailJSResponseStatus
       ? error.text || `EmailJS returned status ${error.status}.`
       : error.message || String(error);
+
+  const confirmAction = (title, message, onConfirm) => {
+    if (
+      IS_WEB &&
+      typeof window !== "undefined" &&
+      typeof window.confirm === "function"
+    ) {
+      if (window.confirm(`${title}\n\n${message}`)) {
+        onConfirm();
+      }
+
+      return;
+    }
+
+    Alert.alert(title, message, [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Confirm",
+        style: "destructive",
+        onPress: onConfirm,
+      },
+    ]);
+  };
 
   const confirmEmailSubmit = (reportName) =>
     new Promise((resolve) => {
@@ -4173,6 +4233,7 @@ export default function App() {
     }
 
     await Linking.openURL(fileUrl);
+    Alert.alert("Opening File", "The job file link has been opened.");
   };
 
   const sendEmailReport = async ({
@@ -5102,11 +5163,35 @@ export default function App() {
   );
 
   const clearHazardSignature = () => {
-    setHazardSignatureStrokes([]);
+    if (getSignaturePointCount(hazardSignatureStrokes) === 0) {
+      Alert.alert("Signature Already Clear", "There is no signature to clear.");
+      return;
+    }
+
+    confirmAction(
+      "Clear Signature?",
+      "This removes the current Hazard ID signature.",
+      () => {
+        setHazardSignatureStrokes([]);
+        Alert.alert("Signature Cleared", "The Hazard ID signature has been cleared.");
+      }
+    );
   };
 
   const clearAsBuiltSignature = () => {
-    setAsBuiltDrainlayerSignatureStrokes([]);
+    if (getSignaturePointCount(asBuiltDrainlayerSignatureStrokes) === 0) {
+      Alert.alert("Signature Already Clear", "There is no signature to clear.");
+      return;
+    }
+
+    confirmAction(
+      "Clear Signature?",
+      "This removes the current drainlayer signature.",
+      () => {
+        setAsBuiltDrainlayerSignatureStrokes([]);
+        Alert.alert("Signature Cleared", "The drainlayer signature has been cleared.");
+      }
+    );
   };
 
   const confirmHazardSignOn = () => {
@@ -5166,7 +5251,10 @@ export default function App() {
     const lastLine = asBuiltLines[asBuiltLines.length - 1];
     const lastSymbol = asBuiltSymbols[asBuiltSymbols.length - 1];
 
-    if (!lastLine && !lastSymbol) return;
+    if (!lastLine && !lastSymbol) {
+      Alert.alert("Nothing To Undo", "There are no As-Built drawing marks to remove.");
+      return;
+    }
 
     if (!lastSymbol || (lastLine && lastLine.createdAt > lastSymbol.createdAt)) {
       setAsBuiltLines((currentLines) => {
@@ -5176,24 +5264,39 @@ export default function App() {
 
         return currentLines.filter((line) => line.groupId !== lastLine.groupId);
       });
+      Alert.alert("Undo Complete", "The last As-Built line has been removed.");
       return;
     }
 
     setAsBuiltSymbols((currentSymbols) => currentSymbols.slice(0, -1));
+    Alert.alert("Undo Complete", "The last As-Built symbol has been removed.");
   };
 
   const clearAsBuiltDrawing = () => {
-    setAsBuiltLines([]);
-    setAsBuiltSymbols([]);
-    setCurrentAsBuiltLine(null);
-    asBuiltLineStartRef.current = null;
-    currentAsBuiltLineRef.current = null;
+    if (asBuiltLines.length === 0 && asBuiltSymbols.length === 0) {
+      Alert.alert("Drawing Already Clear", "There are no As-Built marks to clear.");
+      return;
+    }
+
+    confirmAction(
+      "Clear Drawing?",
+      "This removes all As-Built lines and symbols from the drawing.",
+      () => {
+        setAsBuiltLines([]);
+        setAsBuiltSymbols([]);
+        setCurrentAsBuiltLine(null);
+        asBuiltLineStartRef.current = null;
+        currentAsBuiltLineRef.current = null;
+        Alert.alert("Drawing Cleared", "The As-Built drawing has been cleared.");
+      }
+    );
   };
 
   const resetAsBuiltMapCrop = () => {
     setAsBuiltMapScale(1);
     setAsBuiltMapOffset({ x: 0, y: 0 });
     setAsBuiltMapRotation(0);
+    Alert.alert("Map View Reset", "The As-Built map view has been reset.");
   };
 
   const submitAsBuilt = async () => {

@@ -221,11 +221,36 @@ const normaliseMapAddress = (address) =>
     .slice(0, 220);
 
 const normaliseJobNumber = (jobNumber) => {
-  const digits = String(jobNumber || "").replace(/\D/g, "");
+  const rawValue = String(jobNumber || "").trim().toUpperCase();
 
-  if (!digits) return "";
+  if (!rawValue) return "";
 
-  return digits.slice(0, 4).padStart(4, "0");
+  if (/^(TBA|TMP)-[A-Z0-9]{3,12}$/.test(rawValue)) {
+    return rawValue.slice(0, 16);
+  }
+
+  const digits = rawValue.replace(/\D/g, "");
+
+  if (digits) return digits.slice(0, 4).padStart(4, "0");
+
+  return "";
+};
+
+const createPlaceholderJobNumber = () =>
+  `TBA-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+const normaliseJobStatus = (status, completed = false) => {
+  const cleanedStatus = String(status || "").trim().toLowerCase();
+
+  if (cleanedStatus === "on hold" || cleanedStatus === "on-hold") {
+    return "on hold";
+  }
+
+  if (cleanedStatus === "completed" || completed) {
+    return "completed";
+  }
+
+  return "active";
 };
 
 const normaliseJobName = (jobName) =>
@@ -237,11 +262,13 @@ const normaliseJobName = (jobName) =>
 
 const formatJob = (doc) => {
   const data = doc.data() || {};
+  const status = normaliseJobStatus(data.status, data.completed);
 
   return {
     number: data.number || doc.id,
     name: data.name || "",
-    completed: Boolean(data.completed),
+    status,
+    completed: status === "completed",
     completedAtIso: data.completedAtIso || "",
   };
 };
@@ -428,6 +455,7 @@ const publicJobInfo = async (jobRef) => {
   const doc = await jobRef.get();
   const data = doc.data() || {};
   const files = await getJobFiles(jobRef);
+  const status = normaliseJobStatus(data.status, data.completed);
   const progressUpdates = (Array.isArray(data.progressUpdates)
     ? data.progressUpdates
     : [])
@@ -451,6 +479,8 @@ const publicJobInfo = async (jobRef) => {
   return {
     number: data.number || jobRef.id,
     name: data.name || "",
+    status,
+    completed: status === "completed",
     notes: data.notes || "",
     serviceLocationInfo: data.serviceLocationInfo || "",
     trafficManagementPlan: data.trafficManagementPlan || "",
@@ -462,6 +492,136 @@ const publicJobInfo = async (jobRef) => {
     progressUpdates,
     files,
   };
+};
+
+const copyJobFiles = async (db, sourceJobRef, targetJobRef) => {
+  const filesSnapshot = await sourceJobRef.collection("files").get();
+
+  if (filesSnapshot.empty) return;
+
+  let batch = db.batch();
+  let writes = 0;
+
+  for (const fileDoc of filesSnapshot.docs) {
+    batch.set(targetJobRef.collection("files").doc(fileDoc.id), fileDoc.data());
+    writes += 1;
+
+    if (writes >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      writes = 0;
+    }
+  }
+
+  if (writes) await batch.commit();
+};
+
+const deleteJobFileRecords = async (db, jobRef) => {
+  const filesSnapshot = await jobRef.collection("files").get();
+
+  if (filesSnapshot.empty) return;
+
+  let batch = db.batch();
+  let writes = 0;
+
+  for (const fileDoc of filesSnapshot.docs) {
+    batch.delete(fileDoc.ref);
+    writes += 1;
+
+    if (writes >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      writes = 0;
+    }
+  }
+
+  if (writes) await batch.commit();
+};
+
+const migrateJobReferences = async (db, oldJobNumber, newJobNumber, jobName) => {
+  if (!oldJobNumber || oldJobNumber === newJobNumber) return;
+
+  const reportsSnapshot = await db
+    .collection("reports")
+    .where("jobNumber", "==", oldJobNumber)
+    .limit(450)
+    .get();
+  const hazardSnapshot = await db
+    .collection("hazardIds")
+    .where("jobNumber", "==", oldJobNumber)
+    .limit(450)
+    .get();
+
+  const reportBatch = db.batch();
+
+  reportsSnapshot.docs.forEach((doc) => {
+    reportBatch.update(doc.ref, {
+      jobNumber: newJobNumber,
+      ...(jobName ? { jobName } : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+
+  if (!reportsSnapshot.empty) {
+    await reportBatch.commit();
+  }
+
+  const hazardBatch = db.batch();
+
+  hazardSnapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const nextId = buildHazardDraftId(
+      newJobNumber,
+      normaliseWeekStart(data.weekStart)
+    );
+    const nextRef = db.collection("hazardIds").doc(nextId);
+
+    hazardBatch.set(
+      nextRef,
+      {
+        ...data,
+        jobNumber: newJobNumber,
+        ...(jobName ? { jobName } : {}),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    if (nextRef.id !== doc.id) {
+      hazardBatch.delete(doc.ref);
+    }
+  });
+
+  if (!hazardSnapshot.empty) {
+    await hazardBatch.commit();
+  }
+};
+
+const deleteJobFiles = async (jobRef) => {
+  const filesSnapshot = await jobRef.collection("files").get();
+  let batch = getFirestore().batch();
+  let writes = 0;
+
+  for (const fileDoc of filesSnapshot.docs) {
+    const storagePath = fileDoc.data()?.storagePath;
+
+    if (storagePath) {
+      await getJobFilesBucket().file(storagePath).delete({
+        ignoreNotFound: true,
+      });
+    }
+
+    batch.delete(fileDoc.ref);
+    writes += 1;
+
+    if (writes >= 450) {
+      await batch.commit();
+      batch = getFirestore().batch();
+      writes = 0;
+    }
+  }
+
+  if (writes) await batch.commit();
 };
 
 const formatNzDateTitle = (value = new Date()) => {
@@ -1975,7 +2135,7 @@ exports.jobs = onRequest(
       if (request.method === "GET") {
         const includeCompleted =
           String(request.query?.includeCompleted || "").toLowerCase() === "true";
-        const snapshot = await jobsCollection.orderBy("number").get();
+        const snapshot = await jobsCollection.orderBy("name").get();
         const jobs = snapshot.docs
           .map(formatJob)
           .filter((job) => job.name && (includeCompleted || !job.completed));
@@ -1985,13 +2145,10 @@ exports.jobs = onRequest(
       }
 
       if (request.method === "POST") {
-        const jobNumber = normaliseJobNumber(request.body?.number);
+        const jobNumber =
+          normaliseJobNumber(request.body?.number) || createPlaceholderJobNumber();
         const jobName = normaliseJobName(request.body?.name);
-
-        if (!jobNumber) {
-          response.status(400).json({ error: "Job number is required." });
-          return;
-        }
+        const status = normaliseJobStatus(request.body?.status);
 
         if (!jobName) {
           response.status(400).json({ error: "Job name is required." });
@@ -2005,7 +2162,8 @@ exports.jobs = onRequest(
           {
             number: jobNumber,
             name: jobName,
-            completed: false,
+            status,
+            completed: status === "completed",
             completedAtIso: "",
             updatedAt: now,
             createdAt: now,
@@ -2018,7 +2176,8 @@ exports.jobs = onRequest(
           job: {
             number: jobNumber,
             name: jobName,
-            completed: false,
+            status,
+            completed: status === "completed",
             completedAtIso: "",
           },
         });
@@ -2208,6 +2367,13 @@ exports.jobInfo = onRequest(
           const contentType =
             String(request.body?.contentType || "").trim() ||
             "application/octet-stream";
+          const fileNotes = String(request.body?.notes || "").trim().slice(0, 1000);
+
+          if (!fileNotes) {
+            response.status(400).json({ error: "File description is required." });
+            return;
+          }
+
           const fileBuffer = normaliseJobFileContent(request.body?.content);
           const storageName = filename.replace(/[^\w.\-]/g, "_");
           const storagePath = `job-files/${jobNumber}/${Date.now()}-${storageName}`;
@@ -2241,7 +2407,7 @@ exports.jobInfo = onRequest(
           await fileRef.set({
             filename,
             category: normaliseJobFileCategory(request.body?.category),
-            notes: String(request.body?.notes || "").trim().slice(0, 1000),
+            notes: fileNotes,
             contentType,
             size: fileBuffer.length,
             storagePath,
@@ -2414,7 +2580,7 @@ exports.dashboard = onRequest(
           const [reportsSnapshot, jobsSnapshot, hazardDraftsSnapshot] =
             await Promise.all([
             reportsCollection.orderBy("submittedAt", "desc").limit(120).get(),
-            db.collection("jobs").orderBy("number").get(),
+            db.collection("jobs").orderBy("name").get(),
             db.collection("hazardIds").limit(500).get(),
           ]);
           const reports = reportsSnapshot.docs.map(publicReport);
@@ -2504,7 +2670,7 @@ exports.dashboard = onRequest(
           ]);
           const job = jobDoc.exists
             ? formatJob(jobDoc)
-            : { number: jobNumber, name: "", completed: false };
+            : { number: jobNumber, name: "", status: "active", completed: false };
           const jobInfo = await publicJobInfo(jobRef);
           const reports = reportsSnapshot.docs
             .map(publicReport)
@@ -2657,6 +2823,7 @@ exports.dashboard = onRequest(
 
               entries.push({
                 reportId: report.id,
+                jobNumber: report.jobNumber || "",
                 jobName: report.jobName || report.siteAddress || report.subject,
                 siteAddress: report.siteAddress,
                 taskDescription: report.formData?.taskDescription || "",
@@ -2700,22 +2867,24 @@ exports.dashboard = onRequest(
         }
 
         if (action === "addJob") {
-          const jobNumber = normaliseJobNumber(request.body?.number);
+          const jobNumber =
+            normaliseJobNumber(request.body?.number) || createPlaceholderJobNumber();
           const jobName = normaliseJobName(request.body?.name);
+          const status = normaliseJobStatus(request.body?.status);
 
-          if (!jobNumber || !jobName) {
-            response
-              .status(400)
-              .json({ error: "Job number and job name are required." });
+          if (!jobName) {
+            response.status(400).json({ error: "Job name is required." });
             return;
           }
 
+          const nowDate = new Date();
           await db.collection("jobs").doc(jobNumber).set(
             {
               number: jobNumber,
               name: jobName,
-              completed: false,
-              completedAtIso: "",
+              status,
+              completed: status === "completed",
+              completedAtIso: status === "completed" ? nowDate.toISOString() : "",
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
             },
@@ -2727,9 +2896,78 @@ exports.dashboard = onRequest(
             job: {
               number: jobNumber,
               name: jobName,
-              completed: false,
-              completedAtIso: "",
+              status,
+              completed: status === "completed",
+              completedAtIso: status === "completed" ? nowDate.toISOString() : "",
             },
+          });
+          return;
+        }
+
+        if (action === "updateJob") {
+          const currentJobNumber = normaliseJobNumber(
+            request.body?.currentNumber || request.body?.number
+          );
+          const requestedJobNumber = normaliseJobNumber(request.body?.number);
+          const jobNumber = requestedJobNumber || currentJobNumber;
+          const jobName = normaliseJobName(request.body?.name);
+          const status = normaliseJobStatus(request.body?.status);
+          const nowDate = new Date();
+
+          if (!currentJobNumber || !jobNumber) {
+            response.status(400).json({ error: "Job number is required." });
+            return;
+          }
+
+          if (!jobName) {
+            response.status(400).json({ error: "Job name is required." });
+            return;
+          }
+
+          const currentJobRef = db.collection("jobs").doc(currentJobNumber);
+          const nextJobRef = db.collection("jobs").doc(jobNumber);
+          const currentJobDoc = await currentJobRef.get();
+          const nextJobDoc =
+            currentJobNumber !== jobNumber ? await nextJobRef.get() : currentJobDoc;
+
+          if (currentJobNumber !== jobNumber && nextJobDoc.exists) {
+            response.status(409).json({ error: "That job number already exists." });
+            return;
+          }
+
+          const currentJobData = currentJobDoc.exists ? currentJobDoc.data() || {} : {};
+          const completed = status === "completed";
+          const completedAtIso = completed
+            ? currentJobData.completedAtIso || nowDate.toISOString()
+            : "";
+          const payload = {
+            ...currentJobData,
+            number: jobNumber,
+            name: jobName,
+            status,
+            completed,
+            completedAtIso,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAtIso: nowDate.toISOString(),
+            createdAt:
+              currentJobData.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+          };
+
+          if (currentJobNumber !== jobNumber) {
+            await nextJobRef.set(payload, { merge: true });
+            await copyJobFiles(db, currentJobRef, nextJobRef);
+            await deleteJobFileRecords(db, currentJobRef);
+            await currentJobRef.delete();
+            await migrateJobReferences(db, currentJobNumber, jobNumber, jobName);
+          } else {
+            await currentJobRef.set(payload, { merge: true });
+          }
+
+          const jobDoc = await nextJobRef.get();
+
+          response.status(200).json({
+            ok: true,
+            job: formatJob(jobDoc),
           });
           return;
         }
@@ -2747,6 +2985,7 @@ exports.dashboard = onRequest(
           await db.collection("jobs").doc(jobNumber).set(
             {
               number: jobNumber,
+              status: completed ? "completed" : "active",
               completed,
               completedAtIso: completed ? nowDate.toISOString() : "",
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2759,6 +2998,26 @@ exports.dashboard = onRequest(
           response.status(200).json({
             ok: true,
             job: formatJob(jobDoc),
+          });
+          return;
+        }
+
+        if (action === "deleteJob") {
+          const jobNumber = normaliseJobNumber(request.body?.number);
+
+          if (!jobNumber) {
+            response.status(400).json({ error: "Job number is required." });
+            return;
+          }
+
+          const jobRef = db.collection("jobs").doc(jobNumber);
+
+          await deleteJobFiles(jobRef);
+          await jobRef.delete();
+
+          response.status(200).json({
+            ok: true,
+            number: jobNumber,
           });
           return;
         }

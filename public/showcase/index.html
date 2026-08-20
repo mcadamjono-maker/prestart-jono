@@ -1,0 +1,1201 @@
+<!doctype html>
+<html lang="en-NZ">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#d7ff2f" />
+    <title>WDL Field Forms Showcase</title>
+    <style>
+      :root {
+        --lime: #d7ff2f;
+        --white: #ffffff;
+        --soft: #d8dddf;
+        --muted: #a8b0b4;
+        --panel: rgba(4, 5, 6, 0.78);
+        --line: rgba(215, 255, 47, 0.3);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: #000;
+        color: var(--white);
+        font-family:
+          Aptos,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        background-image:
+          linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.78)),
+          url("./assets/bg.png");
+        background-size: cover;
+        background-position: center;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .deck {
+        position: relative;
+        width: 100vw;
+        height: 100dvh;
+        overflow: hidden;
+      }
+
+      .intro-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding:
+          max(24px, env(safe-area-inset-top))
+          clamp(20px, 6vw, 84px)
+          max(24px, env(safe-area-inset-bottom));
+        background:
+          radial-gradient(circle at 50% 36%, rgba(215, 255, 47, 0.18), transparent 18rem),
+          linear-gradient(rgba(0, 0, 0, 0.54), rgba(0, 0, 0, 0.88)),
+          url("./assets/bg.png");
+        background-size: cover;
+        background-position: center;
+        transition:
+          opacity 300ms ease,
+          visibility 300ms ease;
+      }
+
+      .intro-screen.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .intro-card {
+        width: min(620px, 92vw);
+        text-align: center;
+      }
+
+      .intro-icon {
+        display: block;
+        width: min(210px, 46vw);
+        margin: 0 auto 18px;
+        border-radius: 36px;
+        box-shadow: 0 0 52px rgba(215, 255, 47, 0.2);
+      }
+
+      .intro-logo {
+        display: block;
+        width: min(430px, 78vw);
+        margin: 0 auto 28px;
+      }
+
+      .intro-title {
+        margin: 0 0 14px;
+        font-size: clamp(40px, 9vw, 76px);
+      }
+
+      .intro-copy {
+        max-width: 520px;
+        margin: 0 auto 30px;
+        color: var(--soft);
+        font-size: clamp(18px, 3vw, 24px);
+        line-height: 1.34;
+      }
+
+      .start-button {
+        min-height: 58px;
+        min-width: min(360px, 88vw);
+        border: 0;
+        border-radius: 999px;
+        background: var(--lime);
+        color: #000;
+        font: inherit;
+        font-size: clamp(20px, 4vw, 28px);
+        font-weight: 950;
+        cursor: pointer;
+        box-shadow: 0 0 32px rgba(215, 255, 47, 0.34);
+      }
+
+      .deck.has-intro .topbar,
+      .deck.has-intro .controls,
+      .deck.has-intro .dots {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .slide {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(260px, 36vw);
+        gap: clamp(20px, 5vw, 72px);
+        align-items: center;
+        padding:
+          max(24px, env(safe-area-inset-top))
+          clamp(18px, 6vw, 84px)
+          max(82px, calc(62px + env(safe-area-inset-bottom)));
+        opacity: 0;
+        pointer-events: none;
+        transform: translateX(4%);
+        transition:
+          opacity 360ms ease,
+          transform 360ms ease;
+      }
+
+      .slide.is-active {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0);
+      }
+
+      .slide.single {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .slide.admin-slide {
+        grid-template-columns: minmax(300px, 0.72fr) minmax(420px, 1.28fr);
+      }
+
+      .brand {
+        width: min(310px, 72vw);
+        margin-bottom: clamp(22px, 5vh, 46px);
+      }
+
+      .eyebrow {
+        margin: 0 0 12px;
+        color: var(--lime);
+        font-size: clamp(12px, 2.2vw, 15px);
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
+        color: var(--white);
+        font-weight: 950;
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        max-width: 850px;
+        font-size: clamp(46px, 9vw, 92px);
+      }
+
+      h2 {
+        max-width: 760px;
+        font-size: clamp(34px, 6.2vw, 68px);
+      }
+
+      .lead {
+        max-width: 720px;
+        margin: 24px 0 0;
+        color: var(--soft);
+        font-size: clamp(18px, 2.6vw, 25px);
+        line-height: 1.35;
+      }
+
+      .accent {
+        width: 132px;
+        height: 4px;
+        margin-top: 34px;
+        background: var(--lime);
+        border-radius: 999px;
+        box-shadow: 0 0 20px rgba(215, 255, 47, 0.55);
+      }
+
+      .mini {
+        margin-top: 16px;
+        color: var(--lime);
+        font-size: clamp(14px, 2.1vw, 18px);
+        font-weight: 850;
+      }
+
+      .phone-wrap {
+        justify-self: center;
+        width: min(320px, 78vw);
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        background: rgba(0, 0, 0, 0.78);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+      }
+
+      .phone-wrap img {
+        display: block;
+        width: 100%;
+        border-radius: 22px;
+      }
+
+      .caption {
+        margin: 12px 0 2px;
+        color: var(--lime);
+        font-size: 13px;
+        font-weight: 850;
+        text-align: center;
+      }
+
+      .phone-pair {
+        display: flex;
+        gap: 20px;
+        justify-content: center;
+      }
+
+      .phone-pair .phone-wrap {
+        width: min(235px, 36vw);
+      }
+
+      .dashboard-shot {
+        justify-self: center;
+        width: min(930px, 92vw);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: rgba(0, 0, 0, 0.78);
+        padding: 10px;
+        box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
+      }
+
+      .dashboard-shot img {
+        display: block;
+        width: 100%;
+        border-radius: 16px;
+      }
+
+      .dashboard-shot .caption {
+        margin-top: 11px;
+      }
+
+      .report-showcase {
+        justify-self: center;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: clamp(12px, 2vw, 20px);
+        width: min(710px, 92vw);
+      }
+
+      .report-shot {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(0, 0, 0, 0.78);
+        padding: 8px;
+        box-shadow: 0 20px 62px rgba(0, 0, 0, 0.54);
+      }
+
+      .report-shot img {
+        display: block;
+        width: 100%;
+        border-radius: 10px;
+      }
+
+      .report-shot .caption {
+        margin-top: 8px;
+      }
+
+      .feature-list {
+        max-width: 740px;
+        margin: 30px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .feature-list li {
+        position: relative;
+        margin: 0 0 18px;
+        padding-left: 26px;
+        color: var(--soft);
+        font-size: clamp(17px, 2.35vw, 23px);
+        line-height: 1.28;
+      }
+
+      .feature-list li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.55em;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--lime);
+        box-shadow: 0 0 16px rgba(215, 255, 47, 0.65);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 34px;
+      }
+
+      .step,
+      .value-panel {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        padding: 18px;
+      }
+
+      .step span {
+        display: block;
+        color: var(--lime);
+        font-size: 12px;
+        font-weight: 900;
+        margin-bottom: 12px;
+      }
+
+      .step strong,
+      .value-panel strong {
+        display: block;
+        color: var(--white);
+        font-size: clamp(17px, 2.2vw, 23px);
+        line-height: 1.1;
+        margin-bottom: 8px;
+      }
+
+      .step p,
+      .value-panel p {
+        margin: 0;
+        color: var(--muted);
+        font-size: clamp(13px, 1.8vw, 16px);
+        line-height: 1.28;
+      }
+
+      .value-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 36px;
+        max-width: 1080px;
+      }
+
+      .topbar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 0;
+        z-index: 5;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        padding:
+          max(12px, env(safe-area-inset-top))
+          clamp(14px, 4vw, 32px)
+          10px;
+        pointer-events: none;
+      }
+
+      .topbar img {
+        width: 132px;
+        opacity: 0.88;
+      }
+
+      .counter {
+        color: rgba(255, 255, 255, 0.72);
+        font-size: 13px;
+        font-weight: 800;
+        pointer-events: none;
+      }
+
+      .controls {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 8;
+        display: grid;
+        grid-template-columns: 52px 1fr 52px;
+        gap: 12px;
+        align-items: center;
+        padding:
+          12px
+          clamp(14px, 4vw, 28px)
+          max(14px, env(safe-area-inset-bottom));
+        background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.82));
+      }
+
+      .nav-button,
+      .play-button,
+      .link-button {
+        min-height: 46px;
+        border: 1px solid rgba(215, 255, 47, 0.38);
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.66);
+        color: var(--white);
+        font: inherit;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .nav-button {
+        font-size: 24px;
+      }
+
+      .play-button {
+        color: #000;
+        background: var(--lime);
+        border-color: var(--lime);
+      }
+
+      .link-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 176px;
+        padding: 0 22px;
+        color: #000;
+        background: var(--lime);
+        border-color: var(--lime);
+        text-decoration: none;
+      }
+
+      .dots {
+        position: fixed;
+        left: 50%;
+        bottom: max(76px, calc(62px + env(safe-area-inset-bottom)));
+        z-index: 7;
+        display: flex;
+        gap: 7px;
+        transform: translateX(-50%);
+      }
+
+      .dot {
+        width: 7px;
+        height: 7px;
+        border: 0;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.34);
+        padding: 0;
+      }
+
+      .dot.is-active {
+        width: 24px;
+        background: var(--lime);
+      }
+
+      .deck.is-presenting {
+        cursor: none;
+      }
+
+      .deck.is-presenting .topbar,
+      .deck.is-presenting .controls,
+      .deck.is-presenting .dots,
+      .deck.is-presenting .link-button {
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 220ms ease,
+          transform 220ms ease;
+      }
+
+      .deck.is-presenting .controls {
+        transform: translateY(16px);
+      }
+
+      .deck.is-presenting.is-ui-visible {
+        cursor: default;
+      }
+
+      .deck.is-presenting.is-ui-visible .topbar,
+      .deck.is-presenting.is-ui-visible .controls,
+      .deck.is-presenting.is-ui-visible .dots,
+      .deck.is-presenting.is-ui-visible .link-button {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .deck.is-presenting.is-ui-visible .controls {
+        transform: translateY(0);
+      }
+
+      @media (min-width: 861px) {
+        .report-slide {
+          padding-top: max(92px, calc(76px + env(safe-area-inset-top)));
+        }
+      }
+
+      @media (max-width: 860px) {
+        .slide,
+        .slide.single,
+        .slide.admin-slide {
+          grid-template-columns: 1fr;
+          align-content: start;
+          gap: 20px;
+        }
+
+        .slide {
+          padding:
+            max(44px, calc(28px + env(safe-area-inset-top)))
+            clamp(18px, 6vw, 84px)
+            max(82px, calc(62px + env(safe-area-inset-bottom)));
+        }
+
+        .brand {
+          display: none;
+        }
+
+        .phone-wrap {
+          width: min(235px, 62vw);
+        }
+
+        .menu-detail-slide {
+          gap: 14px;
+        }
+
+        .menu-detail-slide h2 {
+          max-width: 380px;
+          font-size: clamp(30px, 10vw, 42px);
+        }
+
+        .menu-detail-slide .lead {
+          max-width: 390px;
+          font-size: 18px;
+          line-height: 1.28;
+        }
+
+        .menu-detail-slide .feature-list {
+          margin-top: 18px;
+        }
+
+        .menu-detail-slide .feature-list li {
+          margin-bottom: 12px;
+          font-size: 17px;
+          line-height: 1.22;
+        }
+
+        .menu-detail-slide .phone-wrap {
+          width: min(150px, 38vw);
+          padding: 6px;
+          border-radius: 18px;
+        }
+
+        .menu-detail-slide .phone-wrap img {
+          border-radius: 13px;
+        }
+
+        .menu-detail-slide .caption {
+          display: none;
+        }
+
+        .hero-phone {
+          width: min(190px, 49vw);
+        }
+
+        .phone-pair {
+          gap: 12px;
+        }
+
+        .phone-pair .phone-wrap {
+          width: min(170px, 43vw);
+          padding: 7px;
+          border-radius: 22px;
+        }
+
+        .dashboard-shot {
+          width: min(620px, 92vw);
+          padding: 7px;
+          border-radius: 19px;
+        }
+
+        .dashboard-shot img {
+          border-radius: 13px;
+        }
+
+        .report-showcase {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          width: min(360px, 92vw);
+        }
+
+        .report-shot {
+          padding: 5px;
+          border-radius: 13px;
+        }
+
+        .report-shot img {
+          border-radius: 8px;
+        }
+
+        .phone-pair .phone-wrap img {
+          border-radius: 16px;
+        }
+
+        .flow,
+        .value-row {
+          grid-template-columns: 1fr;
+          gap: 10px;
+          margin-top: 24px;
+        }
+
+        .step,
+        .value-panel {
+          padding: 14px;
+        }
+
+        .caption {
+          font-size: 11px;
+        }
+
+        .topbar img {
+          display: none;
+        }
+      }
+
+      @media (max-width: 430px) {
+        .phone-pair .phone-wrap {
+          width: min(152px, 42vw);
+        }
+
+        .lead {
+          margin-top: 18px;
+        }
+
+        .feature-list {
+          margin-top: 22px;
+        }
+
+        .menu-detail-slide {
+          padding-top: max(24px, calc(16px + env(safe-area-inset-top)));
+        }
+
+        .menu-detail-slide .phone-wrap {
+          width: min(132px, 34vw);
+        }
+
+        .intro-icon {
+          width: min(150px, 42vw);
+          border-radius: 27px;
+        }
+
+        .intro-logo {
+          width: min(320px, 82vw);
+          margin-bottom: 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="deck has-intro" aria-label="WDL Field Forms feature showcase">
+      <audio id="presentationMusic" src="./assets/presentation-music.wav" preload="auto" loop></audio>
+
+      <section class="intro-screen" id="introScreen" aria-label="Start presentation">
+        <div class="intro-card">
+          <img class="intro-icon" src="./assets/app-icon.png" alt="WDL Field Forms app icon" />
+          <img class="intro-logo" src="./assets/header-logo.png" alt="Williams Drainage Limited" />
+          <p class="eyebrow">Field paperwork, sorted</p>
+          <h1 class="intro-title">WDL Field Forms</h1>
+          <p class="intro-copy">
+            A field app and office dashboard built for clean records, fast forms,
+            and less chasing paperwork.
+          </p>
+          <button class="start-button" id="startPresentation" type="button">Start presentation</button>
+        </div>
+      </section>
+
+      <div class="topbar" aria-hidden="true">
+        <img src="./assets/header-logo.png" alt="" />
+        <div class="counter"><span id="slideNumber">1</span> / <span id="slideTotal">10</span></div>
+      </div>
+
+      <section class="slide is-active" data-title="WDL Field Forms">
+        <div>
+          <img class="brand" src="./assets/header-logo.png" alt="Williams Drainage Limited" />
+          <p class="eyebrow">Williams Drainage Limited</p>
+          <h1>WDL Field Forms</h1>
+          <p class="lead">
+            A cleaner way to capture field paperwork, site sign-ons, job
+            information, and drainage records.
+          </p>
+          <div class="accent"></div>
+          <p class="mini">Built for the work crews actually do each day.</p>
+        </div>
+        <div class="phone-wrap hero-phone">
+          <img src="./screens/01-menu.png" alt="WDL Field Forms main menu" />
+          <p class="caption">Main menu</p>
+        </div>
+      </section>
+
+      <section class="slide menu-detail-slide" data-title="One app replaces the paper trail">
+        <div>
+          <p class="eyebrow">One field app</p>
+          <h2>One app replaces the paper trail</h2>
+          <p class="lead">
+            Crews open the form they need, complete it on site, and send a
+            polished record back to the office.
+          </p>
+          <ul class="feature-list">
+            <li>Prestarts, incidents, charge ups, Hazard IDs, job information, calculators, and as-builts.</li>
+            <li>Big, simple buttons that make sense under site conditions.</li>
+            <li>Reports arrive ready for filing without chasing loose photos or paper.</li>
+          </ul>
+        </div>
+        <div class="phone-wrap">
+          <img src="./screens/01-menu.png" alt="App feature menu" />
+          <p class="caption">Clear options for the field team</p>
+        </div>
+      </section>
+
+      <section class="slide" data-title="Forms are quick enough to get used">
+        <div>
+          <p class="eyebrow">Field capture</p>
+          <h2>Forms are quick enough to get used</h2>
+          <p class="lead">
+            Prestarts and Hazard IDs are designed around mobile use: clear
+            headings, large controls, saved weekly forms, and signatures on
+            screen.
+          </p>
+          <ul class="feature-list">
+            <li>Truck/Ute, Digger/Machinery, and Trailer prestart checklists.</li>
+            <li>Weekly Hazard IDs that crews can open, update, and sign onto daily.</li>
+            <li>Typed details stay readable for the office and for future reference.</li>
+          </ul>
+        </div>
+        <div class="phone-pair">
+          <div class="phone-wrap">
+            <img src="./screens/02-prestart.png" alt="Prestart checklist screen" />
+            <p class="caption">Prestart</p>
+          </div>
+          <div class="phone-wrap">
+            <img src="./screens/03-hazard.png" alt="Hazard ID screen" />
+            <p class="caption">Hazard ID</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide single" data-title="Reports flow straight into office filing">
+        <div>
+          <p class="eyebrow">Office control</p>
+          <h2>Reports flow straight into office filing</h2>
+          <p class="lead">
+            The office dashboard completes the loop: jobs can be managed
+            centrally, reports stay searchable, and site documents stay attached
+            to the job.
+          </p>
+          <div class="flow">
+            <div class="step">
+              <span>01</span>
+              <strong>Field app</strong>
+              <p>Crew fills the form on phone or web.</p>
+            </div>
+            <div class="step">
+              <span>02</span>
+              <strong>Submit</strong>
+              <p>Emails and report records are created.</p>
+            </div>
+            <div class="step">
+              <span>03</span>
+              <strong>Dashboard</strong>
+              <p>Admin can search, download, print, archive, and manage jobs.</p>
+            </div>
+            <div class="step">
+              <span>04</span>
+              <strong>Job files</strong>
+              <p>Plans, TMPs, service info, notes, and photos stay together.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide admin-slide report-slide" data-title="Sample reports are ready for filing">
+        <div>
+          <p class="eyebrow">Filed reports</p>
+          <h2>Sample reports are ready for filing</h2>
+          <p class="lead">
+            Each submission turns into a clean record with the right heading,
+            key details, notes, signatures, and attachments.
+          </p>
+          <ul class="feature-list">
+            <li>Prestart reports show pass/fault results and vehicle details clearly.</li>
+            <li>Hazard IDs show controls plus the people signed on for the day.</li>
+            <li>Reports are shaped for office filing, printing, and PDF saving.</li>
+          </ul>
+        </div>
+        <div class="report-showcase">
+          <div class="report-shot">
+            <img src="./screens/08-report-prestart.png" alt="Sample prestart report" />
+            <p class="caption">Prestart report</p>
+          </div>
+          <div class="report-shot">
+            <img src="./screens/09-report-hazard.png" alt="Sample Hazard ID report" />
+            <p class="caption">Hazard ID report</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide admin-slide report-slide" data-title="Job records and plans look professional">
+        <div>
+          <p class="eyebrow">Professional records</p>
+          <h2>Job records and plans look professional</h2>
+          <p class="lead">
+            Charge up work and as-builts are captured in the same system, so
+            the office receives consistent records instead of loose notes.
+          </p>
+          <ul class="feature-list">
+            <li>Charge ups break out labour, plant, equipment, materials, and notes.</li>
+            <li>As-built reports include site details, signatures, and the drawing.</li>
+            <li>The visual style stays consistent across every form type.</li>
+          </ul>
+        </div>
+        <div class="report-showcase">
+          <div class="report-shot">
+            <img src="./screens/10-report-chargeup.png" alt="Sample Charge Up report" />
+            <p class="caption">Charge Up report</p>
+          </div>
+          <div class="report-shot">
+            <img src="./screens/11-report-asbuilt.png" alt="Sample As-Built report" />
+            <p class="caption">As-Built report</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide admin-slide" data-title="The dashboard makes every report visible">
+        <div>
+          <p class="eyebrow">Admin dashboard</p>
+          <h2>The office can see the whole picture</h2>
+          <p class="lead">
+            Submitted reports, open weekly Hazard IDs, charge ups, and as-builts
+            are visible from one clean dashboard.
+          </p>
+          <ul class="feature-list">
+            <li>Search, download, print, archive, or inspect filed reports.</li>
+            <li>Open Hazard IDs stay visible until the week is finished.</li>
+            <li>Photos and PDF records stay connected to the right submission.</li>
+          </ul>
+        </div>
+        <div class="dashboard-shot">
+          <img src="./screens/06-admin-overview.png" alt="Office dashboard reports overview" />
+          <p class="caption">Reports and open Hazard IDs</p>
+        </div>
+      </section>
+
+      <section class="slide admin-slide" data-title="Jobs and files stay easy to manage">
+        <div>
+          <p class="eyebrow">Job information</p>
+          <h2>Jobs and files stay easy to manage</h2>
+          <p class="lead">
+            Admin can add jobs, hide completed work from the field list, and
+            keep job notes, plans, TMPs, contacts, and service information
+            together.
+          </p>
+          <ul class="feature-list">
+            <li>Drag-and-drop job files for office staff.</li>
+            <li>Field crews see the job details they need without hunting around.</li>
+            <li>Completed jobs can be kept for history without cluttering the app.</li>
+          </ul>
+        </div>
+        <div class="dashboard-shot">
+          <img src="./screens/07-admin-jobs.png" alt="Office dashboard jobs and files screen" />
+          <p class="caption">Jobs, files, notes, and uploads</p>
+        </div>
+      </section>
+
+      <section class="slide" data-title="The handy site tools are in the same place">
+        <div>
+          <p class="eyebrow">Drainage tools</p>
+          <h2>The handy site tools are in the same place</h2>
+          <p class="lead">
+            Calculation tools and as-built capture reduce back-and-forth in the
+            field and give the office a better record at the end.
+          </p>
+          <ul class="feature-list">
+            <li>Fall percentage, ratio, angle, invert drop, concrete volume, and hotmix quantity checks.</li>
+            <li>As-built records with address, consent, inspector, drainlayer, signature, and drawing.</li>
+            <li>Professional emails and report attachments for filing.</li>
+          </ul>
+        </div>
+        <div class="phone-pair">
+          <div class="phone-wrap">
+            <img src="./screens/04-calculators.png" alt="Calculation tools screen" />
+            <p class="caption">Calculators</p>
+          </div>
+          <div class="phone-wrap">
+            <img src="./screens/05-asbuilt.png" alt="As-built screen" />
+            <p class="caption">As-Built's</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide single" data-title="Less chasing paperwork">
+        <div>
+          <p class="eyebrow">The point</p>
+          <h2>Less chasing paperwork. Better records. A smoother day.</h2>
+          <p class="lead">
+            WDL Field Forms keeps the field team moving and gives the office the
+            records it needs without turning every form into another admin job.
+          </p>
+          <div class="value-row">
+            <div class="value-panel">
+              <strong>Simple enough for site</strong>
+              <p>Fast, obvious screens with only the fields crews need.</p>
+            </div>
+            <div class="value-panel">
+              <strong>Professional enough for filing</strong>
+              <p>Clean reports, photos, signatures, and job details in one place.</p>
+            </div>
+            <div class="value-panel">
+              <strong>Flexible enough for admin</strong>
+              <p>Jobs, files, emails, and settings can keep improving over time.</p>
+            </div>
+          </div>
+          <p class="mini">Ready for field use, office oversight, and steady improvement.</p>
+          <p style="margin-top: 24px">
+            <a class="link-button" href="/" aria-label="Open WDL Field Forms app">Open the app</a>
+          </p>
+        </div>
+      </section>
+
+      <div class="dots" id="dots" aria-label="Slide navigation"></div>
+
+      <nav class="controls" aria-label="Presentation controls">
+        <button class="nav-button" id="prev" type="button" aria-label="Previous slide">&lt;</button>
+        <button class="play-button" id="play" type="button">Auto play</button>
+        <button class="nav-button" id="next" type="button" aria-label="Next slide">&gt;</button>
+      </nav>
+    </main>
+
+    <script>
+      const deck = document.querySelector(".deck");
+      const slides = Array.from(document.querySelectorAll(".slide"));
+      const dotsWrap = document.getElementById("dots");
+      const number = document.getElementById("slideNumber");
+      const total = document.getElementById("slideTotal");
+      const playButton = document.getElementById("play");
+      const introScreen = document.getElementById("introScreen");
+      const startPresentationButton = document.getElementById("startPresentation");
+      const presentationMusic = document.getElementById("presentationMusic");
+      const urlParams = new URLSearchParams(window.location.search);
+      const initialSlide = Number(urlParams.get("slide"));
+      const skipIntro = urlParams.get("skipIntro") === "1";
+      let index = Number.isFinite(initialSlide)
+        ? Math.max(0, Math.min(slides.length - 1, initialSlide - 1))
+        : 0;
+      let timer = null;
+      let touchStartX = 0;
+      let uiHideTimer = null;
+
+      total.textContent = String(slides.length);
+
+      slides.forEach((_, dotIndex) => {
+        const dot = document.createElement("button");
+        dot.className = "dot";
+        dot.type = "button";
+        dot.setAttribute("aria-label", `Go to slide ${dotIndex + 1}`);
+        dot.addEventListener("click", () => show(dotIndex));
+        dotsWrap.appendChild(dot);
+      });
+
+      const dots = Array.from(document.querySelectorAll(".dot"));
+
+      function show(nextIndex) {
+        index = (nextIndex + slides.length) % slides.length;
+        slides.forEach((slide, slideIndex) => {
+          slide.classList.toggle("is-active", slideIndex === index);
+        });
+        dots.forEach((dot, dotIndex) => {
+          dot.classList.toggle("is-active", dotIndex === index);
+        });
+        number.textContent = String(index + 1);
+        document.title = `${slides[index].dataset.title} | WDL Field Forms`;
+      }
+
+      function next() {
+        show(index + 1);
+      }
+
+      function previous() {
+        show(index - 1);
+      }
+
+      function enterFullscreen() {
+        const element = document.documentElement;
+        const request =
+          element.requestFullscreen ||
+          element.webkitRequestFullscreen ||
+          element.msRequestFullscreen;
+        if (!request) return;
+        Promise.resolve(request.call(element)).catch(() => {});
+      }
+
+      function currentFullscreenElement() {
+        return (
+          document.fullscreenElement ||
+          document.webkitFullscreenElement ||
+          document.msFullscreenElement
+        );
+      }
+
+      function exitFullscreen() {
+        const exit =
+          document.exitFullscreen ||
+          document.webkitExitFullscreen ||
+          document.msExitFullscreen;
+        if (!exit || !currentFullscreenElement()) return;
+        Promise.resolve(exit.call(document)).catch(() => {});
+      }
+
+      function revealPresentationUi() {
+        if (!deck.classList.contains("is-presenting")) return;
+        deck.classList.add("is-ui-visible");
+        window.clearTimeout(uiHideTimer);
+        uiHideTimer = window.setTimeout(() => {
+          deck.classList.remove("is-ui-visible");
+        }, 3000);
+      }
+
+      function startMusic({ restart = false } = {}) {
+        if (!presentationMusic) return;
+        presentationMusic.volume = 0.92;
+        if (restart) {
+          try {
+            presentationMusic.currentTime = 0;
+          } catch {}
+        }
+        const playPromise = presentationMusic.play();
+        if (playPromise?.catch) {
+          playPromise.catch(() => {
+            playButton.textContent = "Tap for sound";
+          });
+        }
+      }
+
+      function stopMusic({ reset = false } = {}) {
+        if (!presentationMusic) return;
+        presentationMusic.pause();
+        if (reset) {
+          try {
+            presentationMusic.currentTime = 0;
+          } catch {}
+        }
+      }
+
+      function stopAutoPlay({ leaveFullscreen = false } = {}) {
+        if (timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+        window.clearTimeout(uiHideTimer);
+        deck.classList.remove("is-presenting", "is-ui-visible");
+        playButton.textContent = "Auto play + music";
+        stopMusic();
+        if (!leaveFullscreen) exitFullscreen();
+      }
+
+      function hideIntro() {
+        introScreen.classList.add("is-hidden");
+        deck.classList.remove("has-intro");
+      }
+
+      function startPresentation() {
+        hideIntro();
+        show(0);
+        startMusic({ restart: true });
+        enterFullscreen();
+        deck.classList.add("is-presenting");
+        deck.classList.remove("is-ui-visible");
+        playButton.textContent = "Pause";
+        if (!timer) timer = window.setInterval(next, 6500);
+      }
+
+      function toggleAutoPlay() {
+        if (timer) {
+          stopAutoPlay();
+          return;
+        }
+        hideIntro();
+        startMusic();
+        enterFullscreen();
+        deck.classList.add("is-presenting");
+        deck.classList.remove("is-ui-visible");
+        playButton.textContent = "Pause";
+        timer = window.setInterval(next, 6500);
+      }
+
+      document.getElementById("next").addEventListener("click", () => {
+        stopAutoPlay();
+        next();
+      });
+      document.getElementById("prev").addEventListener("click", () => {
+        stopAutoPlay();
+        previous();
+      });
+      playButton.addEventListener("click", toggleAutoPlay);
+      startPresentationButton.addEventListener("click", startPresentation);
+
+      deck.addEventListener("pointerup", (event) => {
+        if (!deck.classList.contains("is-presenting")) return;
+        if (event.target.closest(".controls, .dots, .link-button")) return;
+        revealPresentationUi();
+      });
+
+      function handleFullscreenChange() {
+        if (!currentFullscreenElement() && timer) {
+          stopAutoPlay({ leaveFullscreen: true });
+        }
+      }
+
+      document.addEventListener("fullscreenchange", handleFullscreenChange);
+      document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && timer) {
+          stopAutoPlay();
+          return;
+        }
+        if (event.key === "ArrowRight" || event.key === " ") {
+          event.preventDefault();
+          stopAutoPlay();
+          next();
+        }
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          stopAutoPlay();
+          previous();
+        }
+      });
+
+      document.addEventListener(
+        "touchstart",
+        (event) => {
+          touchStartX = event.touches[0]?.clientX || 0;
+        },
+        { passive: true }
+      );
+
+      document.addEventListener(
+        "touchend",
+        (event) => {
+          const endX = event.changedTouches[0]?.clientX || 0;
+          const delta = endX - touchStartX;
+          if (Math.abs(delta) < 48) return;
+          stopAutoPlay();
+          if (delta < 0) next();
+          else previous();
+        },
+        { passive: true }
+      );
+
+      if (skipIntro) hideIntro();
+      playButton.textContent = "Auto play + music";
+      show(index);
+    </script>
+  </body>
+</html>

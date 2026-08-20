@@ -20,6 +20,7 @@ const state = {
   showCompletedJobs: false,
   showArchivedReports: false,
 };
+let toastTimer = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -57,6 +58,22 @@ const addClassSafe = (selector, className) => {
 const removeClassSafe = (selector, className) => {
   const element = $(selector);
   if (element) element.classList.remove(className);
+};
+
+const showNotice = (message, variant = "success") => {
+  const toast = $("#adminToast");
+
+  if (!toast) {
+    alert(message);
+    return;
+  }
+
+  window.clearTimeout(toastTimer);
+  toast.textContent = message;
+  toast.className = `admin-toast show ${variant}`;
+  toastTimer = window.setTimeout(() => {
+    toast.className = "admin-toast";
+  }, 2600);
 };
 
 const escapeHtml = (value) =>
@@ -138,6 +155,47 @@ const parseDisplayDate = (value) => {
 };
 
 const getAccessCode = () => localStorage.getItem(ACCESS_CODE_KEY) || "";
+
+const normaliseJobStatus = (status, completed = false) => {
+  const cleanedStatus = String(status || "").trim().toLowerCase();
+
+  if (cleanedStatus === "on hold" || cleanedStatus === "on-hold") return "on hold";
+  if (cleanedStatus === "completed" || completed) return "completed";
+
+  return "active";
+};
+
+const isCompletedJob = (job) =>
+  normaliseJobStatus(job?.status, job?.completed) === "completed";
+
+const jobStatusLabel = (status) =>
+  normaliseJobStatus(status)
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
+const normaliseJobRecord = (job = {}) => {
+  const status = normaliseJobStatus(job.status, job.completed);
+
+  return {
+    ...job,
+    number: String(job.number || "").trim(),
+    name: String(job.name || "").trim(),
+    status,
+    completed: status === "completed",
+  };
+};
+
+const sortJobsByName = (jobs = []) =>
+  [...jobs]
+    .map(normaliseJobRecord)
+    .sort((firstJob, secondJob) => {
+      const nameCompare = firstJob.name.localeCompare(secondJob.name, undefined, {
+        sensitivity: "base",
+      });
+
+      return nameCompare || firstJob.number.localeCompare(secondJob.number);
+    });
 
 const apiFetch = async (endpoint, path = "", options = {}) => {
   const response = await fetch(`${endpoint}${path}`, {
@@ -381,6 +439,9 @@ const isOpenHazard = (hazard) =>
   String(hazard?.status || "").toLowerCase().includes("active draft") ||
   String(hazard?.subject || "").toLowerCase().includes("hazard id draft");
 
+const hazardStatusLabel = (hazard) =>
+  isOpenHazard(hazard) ? "Active" : String(hazard?.status || "Active");
+
 const isArchivedReport = (report) =>
   Boolean(report?.archived) ||
   String(report?.status || "").toLowerCase() === "archived";
@@ -404,7 +465,7 @@ const renderMetrics = () => {
     activeReports.filter((report) => report.reportType === "Charge Up Job Record").length
   );
   setText("#hazardCount", openHazards.length);
-  setText("#jobCount", state.jobs.filter((job) => !job.completed).length);
+  setText("#jobCount", state.jobs.filter((job) => !isCompletedJob(job)).length);
 };
 
 const renderSettings = () => {
@@ -497,7 +558,7 @@ const renderOpenHazards = () => {
               </div>
             </div>
             <div class="actions">
-              <span class="badge">${escapeHtml(hazard.status || "Active Draft")}</span>
+              <span class="badge">${escapeHtml(hazardStatusLabel(hazard))}</span>
               <button type="button" data-open-hazard="${escapeHtml(hazard.id)}">Open</button>
               <button type="button" data-submit-hazard="${escapeHtml(hazard.id)}">Submit</button>
               <button class="secondary danger" type="button" data-delete-hazard="${escapeHtml(hazard.id)}">Delete</button>
@@ -529,18 +590,48 @@ const renderCalendar = () => {
     days
       .map((date, index) => {
         const entries = state.calendarEntries.filter((entry) => entry.date === date);
+        const groupedEntries = entries.reduce((groups, entry) => {
+          const jobTitle =
+            entry.jobName ||
+            entry.siteAddress ||
+            (entry.jobNumber ? `Job ${entry.jobNumber}` : "Job");
+          const key = `${jobTitle}-${entry.jobNumber || ""}`;
+
+          if (!groups.has(key)) {
+            groups.set(key, {
+              title: jobTitle,
+              jobNumber: entry.jobNumber || "",
+              entries: [],
+            });
+          }
+
+          groups.get(key).entries.push(entry);
+          return groups;
+        }, new Map());
 
         return `
           <section class="day">
             <h3>${dayLabels[index]}<br />${formatDisplayDate(date)}</h3>
             ${
-              entries
+              Array.from(groupedEntries.values())
                 .map(
-                  (entry) => `
-                    <div class="signon">
-                      <strong>${escapeHtml(entry.name)}</strong>
-                      <div>${escapeHtml(entry.jobName || entry.siteAddress || "Job")}</div>
-                      <small>${escapeHtml(entry.signedAt || "")}</small>
+                  (group) => `
+                    <div class="calendar-job-group">
+                      <h4>${escapeHtml(group.title)}</h4>
+                      ${
+                        group.jobNumber
+                          ? `<small class="calendar-job-number">Job ${escapeHtml(group.jobNumber)}</small>`
+                          : ""
+                      }
+                      ${group.entries
+                        .map(
+                          (entry) => `
+                            <div class="signon">
+                              <strong>${escapeHtml(entry.name)}</strong>
+                              <small>${escapeHtml(entry.signedAt || "")}</small>
+                            </div>`
+                        )
+                        .join("")}
                     </div>`
                 )
                 .join("") || '<div class="empty">No sign-ons</div>'
@@ -552,8 +643,9 @@ const renderCalendar = () => {
 };
 
 const renderJobs = () => {
-  const activeJobs = state.jobs.filter((job) => !job.completed);
-  const completedJobs = state.jobs.filter((job) => job.completed);
+  const sortedJobs = sortJobsByName(state.jobs);
+  const activeJobs = sortedJobs.filter((job) => !isCompletedJob(job));
+  const completedJobs = sortedJobs.filter(isCompletedJob);
   const visibleJobs = state.showCompletedJobs
     ? [...activeJobs, ...completedJobs]
     : activeJobs;
@@ -563,26 +655,22 @@ const renderJobs = () => {
     `${
       visibleJobs
       .map(
-        (job) => `
-          <article class="job-row-card ${job.completed ? "completed" : ""}">
+        (job) => {
+          const status = normaliseJobStatus(job.status, job.completed);
+
+          return `
+          <article class="job-row-card ${status === "completed" ? "completed" : ""}">
             <button
               class="job-row ${state.selectedJobNumber === job.number ? "selected" : ""}"
               type="button"
               data-select-job="${escapeHtml(job.number)}"
             >
-              <strong>${escapeHtml(job.number)}</strong>
-              <span>${escapeHtml(job.name)}</span>
-              ${job.completed ? '<em>Completed</em>' : ""}
+              <strong>${escapeHtml(job.name)}</strong>
+              <span>${escapeHtml(job.number || "Number to add")}</span>
+              <em>${escapeHtml(jobStatusLabel(status))}</em>
             </button>
-            <button
-              class="job-complete-button"
-              type="button"
-              data-complete-job="${escapeHtml(job.number)}"
-              data-completed="${job.completed ? "false" : "true"}"
-            >
-              ${job.completed ? "Restore" : "Mark Completed"}
-            </button>
-          </article>`
+          </article>`;
+        }
       )
       .join("") || emptyHtml()
     }
@@ -598,7 +686,11 @@ const renderJobs = () => {
 
 const setJobEditorDisabled = (isDisabled) => {
   [
-    "#saveJobInfo",
+    "#saveJobFloating",
+    "#deleteJob",
+    "#editJobName",
+    "#editJobNumber",
+    "#editJobStatus",
     "#jobNotes",
     "#serviceLocationInfo",
     "#trafficManagementPlan",
@@ -617,15 +709,16 @@ const setJobEditorDisabled = (isDisabled) => {
 const renderSelectedJobInfo = () => {
   const selectedJob = state.jobs.find((job) => job.number === state.selectedJobNumber);
   const jobInfo = state.selectedJobInfo || {};
+  const selectedJobStatus = normaliseJobStatus(selectedJob?.status, selectedJob?.completed);
 
   setText(
     "#selectedJobTitle",
-    selectedJob ? `${selectedJob.number} - ${selectedJob.name}` : "Select a job"
+    selectedJob ? selectedJob.name : "Select a job"
   );
   setText(
     "#selectedJobMeta",
     selectedJob
-      ? "Office notes and files shown here are available in the field app."
+      ? `${selectedJob.number || "Number to add"} | ${jobStatusLabel(selectedJobStatus)}`
       : "Choose a job to manage notes and files."
   );
 
@@ -651,6 +744,9 @@ const renderSelectedJobInfo = () => {
   setValue("#purchaseOrderNumbers", jobInfo.purchaseOrderNumbers || "");
   setValue("#jobContacts", jobInfo.contacts || "");
   setValue("#otherDetails", jobInfo.otherDetails || "");
+  setValue("#editJobName", selectedJob?.name || "");
+  setValue("#editJobNumber", selectedJob?.number || "");
+  setValue("#editJobStatus", selectedJobStatus);
 
   setJobEditorDisabled(!selectedJob);
 
@@ -662,9 +758,9 @@ const renderSelectedJobInfo = () => {
             (file) => `
               <article class="file-record">
                 <div>
-                  <h4>${escapeHtml(file.filename)}</h4>
+                  <h4>${escapeHtml(file.notes || "File description")}</h4>
                   <p>${escapeHtml(file.category || "File")} | ${escapeHtml(
-              file.notes || "No note"
+              file.filename || "Uploaded file"
             )}</p>
                   <small>${escapeHtml(formatDate(file.uploadedAtIso))}</small>
                 </div>
@@ -719,6 +815,7 @@ const selectJob = async (jobNumber) => {
   const payload = await jobInfoFetch(`?jobNumber=${encodeURIComponent(jobNumber)}`);
   state.selectedJobInfo = payload.job || null;
   renderSelectedJobInfo();
+  showNotice("Job info saved.");
 };
 
 const saveSelectedJobInfo = async () => {
@@ -744,6 +841,164 @@ const saveSelectedJobInfo = async () => {
   renderSelectedJobInfo();
 };
 
+const saveSelectedJobDetails = async () => {
+  if (!state.selectedJobNumber) return;
+
+  const name = $("#editJobName").value.trim();
+  const number = $("#editJobNumber").value.trim();
+  const status = normaliseJobStatus($("#editJobStatus").value);
+
+  if (!name) {
+    showNotice("Enter a job name before saving.", "error");
+    return;
+  }
+
+  const previousJobNumber = state.selectedJobNumber;
+  const payload = await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "updateJob",
+      currentNumber: previousJobNumber,
+      number,
+      name,
+      status,
+    }),
+  });
+  const updatedJob = normaliseJobRecord(payload.job);
+
+  if (!updatedJob.number) return;
+
+  state.jobs = sortJobsByName([
+    ...state.jobs.filter(
+      (job) => job.number !== previousJobNumber && job.number !== updatedJob.number
+    ),
+    updatedJob,
+  ]);
+  state.selectedJobNumber =
+    isCompletedJob(updatedJob) && !state.showCompletedJobs ? "" : updatedJob.number;
+  state.selectedJobInfo = null;
+
+  renderMetrics();
+  renderJobs();
+
+  if (state.selectedJobNumber) {
+    await selectJob(state.selectedJobNumber);
+  } else {
+    renderSelectedJobInfo();
+  }
+
+  showNotice("Job details saved.");
+};
+
+const saveSelectedJobChanges = async () => {
+  if (!state.selectedJobNumber) {
+    showNotice("Select a job before saving.", "error");
+    return;
+  }
+
+  const name = $("#editJobName").value.trim();
+  const number = $("#editJobNumber").value.trim();
+  const status = normaliseJobStatus($("#editJobStatus").value);
+  const infoValues = {
+    notes: $("#jobNotes").value,
+    serviceLocationInfo: $("#serviceLocationInfo").value,
+    trafficManagementPlan: $("#trafficManagementPlan").value,
+    purchaseOrderNumbers: $("#purchaseOrderNumbers").value,
+    contacts: $("#jobContacts").value,
+    otherDetails: $("#otherDetails").value,
+  };
+
+  if (!name) {
+    showNotice("Enter a job name before saving.", "error");
+    return;
+  }
+
+  const saveButton = $("#saveJobFloating");
+  const previousJobNumber = state.selectedJobNumber;
+
+  setDisabled("#saveJobFloating", true);
+  setText("#saveJobFloating", "Saving");
+
+  try {
+    const jobPayload = await dashboardFetch("", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "updateJob",
+        currentNumber: previousJobNumber,
+        number,
+        name,
+        status,
+      }),
+    });
+    const updatedJob = normaliseJobRecord(jobPayload.job);
+
+    if (!updatedJob.number) {
+      showNotice("Job could not be saved.", "error");
+      return;
+    }
+
+    const jobInfoPayload = await jobInfoFetch("", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "updateInfo",
+        jobNumber: updatedJob.number,
+        name: updatedJob.name,
+        ...infoValues,
+      }),
+    });
+
+    state.jobs = sortJobsByName([
+      ...state.jobs.filter(
+        (job) =>
+          job.number !== previousJobNumber && job.number !== updatedJob.number
+      ),
+      updatedJob,
+    ]);
+    state.selectedJobNumber =
+      isCompletedJob(updatedJob) && !state.showCompletedJobs
+        ? ""
+        : updatedJob.number;
+    state.selectedJobInfo = state.selectedJobNumber
+      ? jobInfoPayload.job || null
+      : null;
+
+    renderMetrics();
+    renderJobs();
+    renderSelectedJobInfo();
+    showNotice("Job updates saved.");
+  } finally {
+    if (saveButton) {
+      setText("#saveJobFloating", "Save");
+      setDisabled("#saveJobFloating", !state.selectedJobNumber);
+    }
+  }
+};
+
+const deleteSelectedJob = async () => {
+  if (!state.selectedJobNumber) return;
+
+  if (!window.confirm("Are you sure you want to delete this job?")) return;
+
+  const jobNumber = state.selectedJobNumber;
+
+  await dashboardFetch("", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "deleteJob",
+      number: jobNumber,
+    }),
+  });
+
+  state.jobs = state.jobs.filter((job) => job.number !== jobNumber);
+  state.selectedJobNumber = "";
+  state.selectedJobInfo = null;
+
+  renderMetrics();
+  renderJobs();
+  renderSelectedJobInfo();
+  showNotice("Job deleted.");
+};
+
 const saveSettings = async () => {
   const config = {
     recipientEmails: linesToList($("#settingRecipientEmails").value),
@@ -767,7 +1022,7 @@ const saveSettings = async () => {
 
   state.appConfig = payload.config || state.appConfig;
   renderSettings();
-  alert("Settings saved.");
+  showNotice("Settings saved.");
 };
 
 const saveReportWorkflow = async () => {
@@ -788,6 +1043,7 @@ const saveReportWorkflow = async () => {
 
   replaceReportInState(updatedReport);
   openReportObject(updatedReport);
+  showNotice("Review status saved.");
 };
 
 const replaceReportInState = (updatedReport) => {
@@ -830,6 +1086,7 @@ const setReportArchived = async (reportId, archived) => {
 
   replaceReportInState(payload.report);
   if (payload.report) openReportObject(payload.report);
+  showNotice(archived ? "Report archived." : "Report restored.");
 };
 
 const deleteReport = async (reportId) => {
@@ -859,6 +1116,7 @@ const deleteReport = async (reportId) => {
   renderReports();
   renderMetrics();
   renderOpenHazards();
+  showNotice("Report deleted.");
 };
 
 const fileToBase64 = (file) =>
@@ -873,12 +1131,19 @@ const uploadFiles = async (files) => {
   if (!files.length) return;
 
   if (!state.selectedJobNumber) {
-    alert("Select a job before uploading files.");
+    showNotice("Select a job before uploading files.", "error");
     setValue("#jobFileInput", "");
     return;
   }
 
   const selectedJob = state.jobs.find((job) => job.number === state.selectedJobNumber);
+  const fileNotes = $("#fileNotes").value.trim();
+
+  if (!fileNotes) {
+    showNotice("Enter a file description before uploading.", "error");
+    setValue("#jobFileInput", "");
+    return;
+  }
 
   for (const file of files) {
     const content = await fileToBase64(file);
@@ -891,7 +1156,7 @@ const uploadFiles = async (files) => {
         filename: file.name,
         contentType: file.type || "application/octet-stream",
         category: $("#fileCategory").value,
-        notes: $("#fileNotes").value,
+        notes: fileNotes,
         content,
       }),
     });
@@ -902,6 +1167,7 @@ const uploadFiles = async (files) => {
   setValue("#jobFileInput", "");
   setValue("#fileNotes", "");
   renderSelectedJobInfo();
+  showNotice(files.length === 1 ? "File uploaded." : `${files.length} files uploaded.`);
 };
 
 const deleteJobFile = async (fileId) => {
@@ -920,6 +1186,7 @@ const deleteJobFile = async (fileId) => {
 
   state.selectedJobInfo = payload.job || null;
   renderSelectedJobInfo();
+  showNotice("Job file deleted.");
 };
 
 const detailRows = (report) =>
@@ -1162,13 +1429,13 @@ const loadSummary = async () => {
   state.reports = payload.reports || [];
   state.chargeUpReports = payload.chargeUpReports || [];
   state.hazardReports = payload.hazardReports || [];
-  state.jobs = payload.jobs || [];
+  state.jobs = sortJobsByName(payload.jobs || []);
   state.appConfig = payload.appConfig || state.appConfig;
 
   if (
     state.selectedJobNumber &&
     !state.showCompletedJobs &&
-    state.jobs.find((job) => job.number === state.selectedJobNumber)?.completed
+    isCompletedJob(state.jobs.find((job) => job.number === state.selectedJobNumber))
   ) {
     state.selectedJobNumber = "";
     state.selectedJobInfo = null;
@@ -1186,7 +1453,7 @@ const loadCalendar = async ({ silent = false } = {}) => {
   const parsedWeekStart = parseDisplayDate($("#calendarWeek").value);
 
   if (!parsedWeekStart) {
-    if (!silent) alert("Enter the week starting date as dd/mm/yyyy.");
+    if (!silent) showNotice("Enter the week starting date as dd/mm/yyyy.", "error");
     return;
   }
 
@@ -1221,7 +1488,10 @@ const addJob = async (event) => {
   const number = $("#jobNumber").value.trim();
   const name = $("#jobName").value.trim();
 
-  if (!number || !name) return;
+  if (!name) {
+    showNotice("Enter a job name before adding the job.", "error");
+    return;
+  }
 
   const payload = await dashboardFetch("", {
     method: "POST",
@@ -1232,12 +1502,19 @@ const addJob = async (event) => {
     }),
   });
 
-  state.jobs = [...state.jobs.filter((job) => job.number !== payload.job.number), payload.job]
-    .sort((a, b) => a.number.localeCompare(b.number));
+  const savedJob = normaliseJobRecord(payload.job);
+
+  state.jobs = sortJobsByName([
+    ...state.jobs.filter((job) => job.number !== savedJob.number),
+    savedJob,
+  ]);
+  state.selectedJobNumber = savedJob.number;
   setValue("#jobNumber", "");
   setValue("#jobName", "");
   renderMetrics();
   renderJobs();
+  await selectJob(savedJob.number);
+  showNotice("Job added.");
 };
 
 const setJobCompleted = async (jobNumber, completed) => {
@@ -1255,8 +1532,9 @@ const setJobCompleted = async (jobNumber, completed) => {
 
   state.jobs = [
     ...state.jobs.filter((job) => job.number !== updatedJob.number),
-    updatedJob,
-  ].sort((a, b) => a.number.localeCompare(b.number));
+    normaliseJobRecord(updatedJob),
+  ];
+  state.jobs = sortJobsByName(state.jobs);
 
   if (completed && state.selectedJobNumber === updatedJob.number) {
     state.selectedJobNumber = "";
@@ -1266,6 +1544,7 @@ const setJobCompleted = async (jobNumber, completed) => {
   renderMetrics();
   renderJobs();
   renderSelectedJobInfo();
+  showNotice(completed ? "Job marked completed." : "Job restored.");
 };
 
 const submitOpenHazard = async (hazardId) => {
@@ -1293,6 +1572,7 @@ const submitOpenHazard = async (hazardId) => {
 
   await loadSummary();
   await loadCalendar({ silent: true });
+  showNotice("Hazard ID submitted.");
 };
 
 const deleteOpenHazard = async (hazardId) => {
@@ -1320,6 +1600,7 @@ const deleteOpenHazard = async (hazardId) => {
 
   await loadSummary();
   await loadCalendar({ silent: true });
+  showNotice("Open Hazard ID deleted.");
 };
 
 const toggleCompletedJobs = () => {
@@ -1349,11 +1630,17 @@ const init = () => {
 
   $("#saveAccessCode").addEventListener("click", () => {
     localStorage.setItem(ACCESS_CODE_KEY, $("#accessCode").value.trim());
-    loadSummary().then(loadCalendar).catch((error) => alert(error.message));
+    loadSummary()
+      .then(loadCalendar)
+      .then(() => showNotice("Access code saved."))
+      .catch((error) => alert(error.message));
   });
 
   $("#refreshDashboard").addEventListener("click", () =>
-    loadSummary().then(loadCalendar).catch((error) => alert(error.message))
+    loadSummary()
+      .then(loadCalendar)
+      .then(() => showNotice("Dashboard refreshed."))
+      .catch((error) => alert(error.message))
   );
   $("#saveSettings").addEventListener("click", () =>
     saveSettings().catch((error) => alert(error.message))
@@ -1371,11 +1658,26 @@ const init = () => {
       refreshCalendarQuietly();
     }
   });
+  document.addEventListener("focusin", (event) => {
+    if (event.target.closest("input, textarea, select")) {
+      document.body.classList.add("is-inputting");
+    }
+  });
+  document.addEventListener("focusout", () => {
+    window.setTimeout(() => {
+      if (!document.activeElement?.closest?.("input, textarea, select")) {
+        document.body.classList.remove("is-inputting");
+      }
+    }, 80);
+  });
   $("#jobForm").addEventListener("submit", (event) =>
     addJob(event).catch((error) => alert(error.message))
   );
-  $("#saveJobInfo").addEventListener("click", () =>
-    saveSelectedJobInfo().catch((error) => alert(error.message))
+  $("#saveJobFloating").addEventListener("click", () =>
+    saveSelectedJobChanges().catch((error) => alert(error.message))
+  );
+  $("#deleteJob").addEventListener("click", () =>
+    deleteSelectedJob().catch((error) => alert(error.message))
   );
   $("#chooseFiles").addEventListener("click", () => $("#jobFileInput").click());
   $("#jobFileInput").addEventListener("change", (event) =>
@@ -1456,6 +1758,7 @@ const init = () => {
       printWindow.document.close();
       printWindow.focus();
       printWindow.print();
+      showNotice("Print window opened.");
     }
 
     if (event.target.id === "downloadReport" && state.selectedReport) {
@@ -1470,6 +1773,7 @@ const init = () => {
       }.html`;
       link.click();
       URL.revokeObjectURL(url);
+      showNotice("Report download started.");
     }
 
     if (event.target.id === "saveReportWorkflow" && state.selectedReport) {

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111111" />
     <title>WDL Office Dashboard</title>
     <link rel="icon" href="/favicon.ico" />
-    <link rel="stylesheet" href="/admin.css?v=20260727-1" />
+    <link rel="stylesheet" href="/admin.css?v=20260820-1" />
   </head>
   <body>
     <header class="topbar">
@@ -116,7 +116,7 @@
           </div>
         </div>
         <form id="jobForm" class="job-form">
-          <input id="jobNumber" inputmode="numeric" placeholder="Job number" />
+          <input id="jobNumber" placeholder="Job number (optional)" />
           <input id="jobName" placeholder="Job name / site" />
           <button type="submit">Add Job</button>
         </form>
@@ -131,8 +131,29 @@
                 <h3 id="selectedJobTitle">Select a job</h3>
                 <p id="selectedJobMeta">Choose a job to manage notes and files.</p>
               </div>
-              <button id="saveJobInfo" type="button">Save Job Info</button>
             </div>
+
+            <section class="job-details-panel">
+              <label>
+                Job Name
+                <input id="editJobName" placeholder="Job name / site" />
+              </label>
+              <label>
+                Job Number
+                <input id="editJobNumber" placeholder="Number to add" />
+              </label>
+              <label>
+                Status
+                <select id="editJobStatus">
+                  <option value="active">Active</option>
+                  <option value="on hold">On Hold</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+              <div class="job-details-actions">
+                <button id="deleteJob" class="secondary danger" type="button">Delete Job</button>
+              </div>
+            </section>
 
             <div id="jobShortcuts" class="job-shortcuts"></div>
 
@@ -187,13 +208,16 @@
                 <option>Photos</option>
                 <option>Other</option>
               </select>
-              <input id="fileNotes" placeholder="File note / description" />
+              <input id="fileNotes" required placeholder="File description required" />
               <button id="chooseFiles" type="button">Choose Files</button>
             </div>
 
             <div id="jobFilesList" class="file-list"></div>
           </section>
         </div>
+        <button id="saveJobFloating" class="floating-save-button" type="button" disabled>
+          Save
+        </button>
       </section>
 
       <section id="settings" class="panel">
@@ -253,6 +277,8 @@
       <div class="empty">Nothing to show yet.</div>
     </template>
 
-    <script src="/admin.js?v=20260727-1" defer></script>
+    <div id="adminToast" class="admin-toast" role="status" aria-live="polite"></div>
+
+    <script src="/admin.js?v=20260820-1" defer></script>
   </body>
 </html>
