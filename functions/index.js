@@ -17,13 +17,69 @@ const ALLOWED_RECIPIENT_DOMAINS = ["williamsdrainage.co.nz"];
 const ALLOWED_RECIPIENT_EMAILS = [DEFAULT_TO_EMAIL.toLowerCase()];
 const NZ_TIME_ZONE = "Pacific/Auckland";
 const APP_CONFIG_DOC_ID = "field-app";
+const DEFAULT_RECIPIENT_EMAILS = [
+  "Jonomcadam@hotmail.com",
+  "Trish@williamsdrainage.co.nz",
+  "Brad@williamsdrainage.co.nz",
+];
+const REPORT_RECIPIENT_TYPES = [
+  {
+    key: "default",
+    label: "All Other Reports",
+    reportTypes: [],
+  },
+  {
+    key: "prestart",
+    label: "Prestart Checklists",
+    reportTypes: ["Prestart Checklist"],
+  },
+  {
+    key: "incident",
+    label: "Incident Reports",
+    reportTypes: ["Incident Report"],
+  },
+  {
+    key: "confined",
+    label: "Confined Space Entry",
+    reportTypes: ["Confined Space Entry Permit"],
+  },
+  {
+    key: "chargeup",
+    label: "Charge Ups",
+    reportTypes: ["Charge Up Job Record"],
+  },
+  {
+    key: "hazard",
+    label: "Hazard IDs",
+    reportTypes: ["Hazard ID"],
+  },
+  {
+    key: "asbuilt",
+    label: "As-Builts",
+    reportTypes: ["As-Built Plan"],
+  },
+  {
+    key: "purchase",
+    label: "Purchase Orders",
+    reportTypes: ["Purchase Order Request"],
+  },
+  {
+    key: "variation",
+    label: "Job Variations",
+    reportTypes: ["Job Variation Request"],
+  },
+];
+const DEFAULT_REPORT_RECIPIENT_EMAILS = REPORT_RECIPIENT_TYPES.reduce(
+  (output, reportConfig) => ({
+    ...output,
+    [reportConfig.key]: [DEFAULT_TO_EMAIL],
+  }),
+  {}
+);
 const DEFAULT_APP_CONFIG = {
-  recipientEmails: [
-    "Jonomcadam@hotmail.com",
-    "Trish@williamsdrainage.co.nz",
-    "Brad@williamsdrainage.co.nz",
-  ],
+  recipientEmails: DEFAULT_RECIPIENT_EMAILS,
   defaultRecipientEmail: "Jonomcadam@hotmail.com",
+  reportRecipientEmails: DEFAULT_REPORT_RECIPIENT_EMAILS,
   expiryWarningDays: 30,
   checklistTemplates: {
     truck: [
@@ -160,6 +216,9 @@ const formatReportHeading = (reportType) => {
     "prestart checklist": "Prestart Checklist",
     incident: "Incident Report",
     "incident report": "Incident Report",
+    "confined space": "Confined Space Entry Permit",
+    "confined space entry": "Confined Space Entry Permit",
+    "confined space entry permit": "Confined Space Entry Permit",
     "purchase order": "Purchase Order Request",
     "purchase order request": "Purchase Order Request",
     "job variation": "Job Variation Request",
@@ -298,6 +357,89 @@ const normaliseStringList = (value, fallback = [], maxItems = 80) => {
   return items.length ? [...new Set(items)] : fallback;
 };
 
+const normaliseRecipientEmails = (
+  emails,
+  fallbackEmails = [DEFAULT_TO_EMAIL],
+  maxItems = 12
+) => {
+  const fallback = normaliseStringList(fallbackEmails, [DEFAULT_TO_EMAIL], maxItems);
+  const candidates = normaliseStringList(emails, [], maxItems);
+  const safeEmails = [];
+
+  candidates.forEach((email) => {
+    try {
+      const safeEmail = normaliseRecipientEmail(email);
+      const lowerEmail = safeEmail.toLowerCase();
+
+      if (!safeEmails.some((existing) => existing.toLowerCase() === lowerEmail)) {
+        safeEmails.push(safeEmail);
+      }
+    } catch (error) {
+      // Ignore invalid dashboard entries instead of blocking every report.
+    }
+  });
+
+  if (safeEmails.length) return safeEmails;
+
+  return fallback
+    .map((email) => {
+      try {
+        return normaliseRecipientEmail(email);
+      } catch (error) {
+        return "";
+      }
+    })
+    .filter(Boolean)
+    .slice(0, maxItems);
+};
+
+const getReportRecipientKey = (reportType) => {
+  const heading = formatReportHeading(reportType).toLowerCase();
+  const matchedReport = REPORT_RECIPIENT_TYPES.find((reportConfig) =>
+    reportConfig.reportTypes.some(
+      (knownReportType) => formatReportHeading(knownReportType).toLowerCase() === heading
+    )
+  );
+
+  return matchedReport?.key || "default";
+};
+
+const normaliseReportRecipientEmails = (
+  reportRecipientEmails,
+  defaultRecipientEmail
+) => {
+  const source = toPlainObject(reportRecipientEmails);
+  const fallback = [defaultRecipientEmail || DEFAULT_TO_EMAIL];
+
+  return REPORT_RECIPIENT_TYPES.reduce((output, reportConfig) => {
+    output[reportConfig.key] = normaliseRecipientEmails(
+      source[reportConfig.key],
+      fallback,
+      12
+    );
+
+    return output;
+  }, {});
+};
+
+const getConfiguredReportRecipientEmails = (
+  appConfig,
+  reportType,
+  requestedRecipientEmail = ""
+) => {
+  const config = normaliseAppConfig(appConfig || DEFAULT_APP_CONFIG);
+  const reportKey = getReportRecipientKey(reportType);
+  const requestedFallback = requestedRecipientEmail
+    ? normaliseStringList(requestedRecipientEmail, [], 12)
+    : [config.defaultRecipientEmail || DEFAULT_TO_EMAIL];
+
+  return normaliseRecipientEmails(
+    config.reportRecipientEmails?.[reportKey],
+    requestedFallback,
+    12
+  );
+};
+
 const normaliseChecklistTemplates = (templates) => {
   const source =
     templates && typeof templates === "object"
@@ -328,35 +470,34 @@ const normaliseChecklistTemplates = (templates) => {
 
 const normaliseAppConfig = (value = {}) => {
   const source = toPlainObject(value);
-  const recipientEmails = normaliseStringList(
+  const recipientEmails = normaliseRecipientEmails(
     source.recipientEmails,
     DEFAULT_APP_CONFIG.recipientEmails,
     12
-  ).filter((email) => {
-    const lowerEmail = email.toLowerCase();
-    const domain = lowerEmail.split("@").pop();
-
-    return (
-      ALLOWED_RECIPIENT_EMAILS.includes(lowerEmail) ||
-      ALLOWED_RECIPIENT_DOMAINS.includes(domain)
-    );
-  });
+  );
   const safeRecipientEmails = recipientEmails.length
     ? recipientEmails
     : DEFAULT_APP_CONFIG.recipientEmails;
-  const defaultRecipientEmail = safeRecipientEmails.includes(
-    source.defaultRecipientEmail
-  )
-    ? source.defaultRecipientEmail
-    : safeRecipientEmails[0];
+  const requestedDefaultRecipientEmail = String(
+    source.defaultRecipientEmail || ""
+  ).toLowerCase();
+  const defaultRecipientEmail =
+    safeRecipientEmails.find(
+      (email) => email.toLowerCase() === requestedDefaultRecipientEmail
+    ) || safeRecipientEmails[0];
   const expiryWarningDays = Math.max(
     1,
     Math.min(120, Number(source.expiryWarningDays || DEFAULT_APP_CONFIG.expiryWarningDays))
+  );
+  const reportRecipientEmails = normaliseReportRecipientEmails(
+    source.reportRecipientEmails,
+    defaultRecipientEmail
   );
 
   return {
     recipientEmails: safeRecipientEmails,
     defaultRecipientEmail,
+    reportRecipientEmails,
     expiryWarningDays,
     checklistTemplates: normaliseChecklistTemplates(source.checklistTemplates),
     hazardYardChecks: normaliseStringList(
@@ -1560,6 +1701,7 @@ const buildStoredReport = ({
   subject,
   message,
   recipientEmail,
+  recipientEmails = [],
   fields,
   formData,
   attachments,
@@ -1586,6 +1728,7 @@ const buildStoredReport = ({
     subject,
     message,
     recipientEmail,
+    recipientEmails,
     fields: safeFields,
     formData: safeFormData,
     status: getReportStatus(reportType, safeFields),
@@ -1890,6 +2033,7 @@ const sendAndStoreReport = async ({
   subject,
   message,
   recipientEmail,
+  recipientEmails,
   fields = {},
   formData = {},
   attachments = [],
@@ -1899,6 +2043,16 @@ const sendAndStoreReport = async ({
   }
 
   const normalisedAttachments = normaliseAttachments(attachments);
+  const safeRecipientEmails = normaliseRecipientEmails(
+    recipientEmails,
+    [recipientEmail || DEFAULT_TO_EMAIL],
+    12
+  );
+  const recipientEmailLabel = safeRecipientEmails.join(", ");
+  const fieldsWithRecipients = {
+    ...toPlainObject(fields),
+    recipient_email: recipientEmailLabel,
+  };
   const reportRef = getFirestore().collection("reports").doc();
   const storedAttachments = await storeReportAttachments(
     reportRef.id,
@@ -1909,7 +2063,7 @@ const sendAndStoreReport = async ({
     const transporter = createMailerTransporter();
     const emailResult = await transporter.sendMail({
       from: smtpFrom,
-      to: recipientEmail,
+      to: safeRecipientEmails,
       replyTo: smtpReplyTo,
       subject,
       text: `${formatReportHeading(reportType)}\n${subject}\n\nOpen this email in an HTML-capable mail app to view the filed report.`,
@@ -1917,7 +2071,7 @@ const sendAndStoreReport = async ({
         reportType,
         subject,
         message,
-        fields,
+        fields: fieldsWithRecipients,
         formData,
         attachments: normalisedAttachments,
       }),
@@ -1929,8 +2083,9 @@ const sendAndStoreReport = async ({
         reportType,
         subject,
         message,
-        recipientEmail,
-        fields,
+        recipientEmail: recipientEmailLabel,
+        recipientEmails: safeRecipientEmails,
+        fields: fieldsWithRecipients,
         formData,
         attachments: storedAttachments,
       })
@@ -1950,11 +2105,13 @@ const submitHazardDraftReport = async ({
   hazardRef,
   hazardDoc,
   recipientEmail,
+  recipientEmails,
 }) => {
   const reportPayload = buildHazardDraftReportPayload(hazardDoc);
   const { emailResult, reportRef } = await sendAndStoreReport({
     ...reportPayload,
     recipientEmail,
+    recipientEmails,
     attachments: [],
   });
 
@@ -1978,8 +2135,9 @@ exports.submitWeeklyHazardDrafts = onSchedule(
   async () => {
     const db = getFirestore();
     const appConfig = await getPublicAppConfig();
-    const recipientEmail = normaliseRecipientEmail(
-      appConfig.defaultRecipientEmail || DEFAULT_TO_EMAIL
+    const recipientEmails = getConfiguredReportRecipientEmails(
+      appConfig,
+      "Hazard ID"
     );
     const snapshot = await db.collection("hazardIds").limit(500).get();
     let submitted = 0;
@@ -1990,7 +2148,7 @@ exports.submitWeeklyHazardDrafts = onSchedule(
         await submitHazardDraftReport({
           hazardRef: hazardDoc.ref,
           hazardDoc,
-          recipientEmail,
+          recipientEmails,
         });
         submitted += 1;
       } catch (error) {
@@ -2080,8 +2238,15 @@ exports.sendReport = onRequest(
       const reportType = normaliseReportType(request.body?.reportType);
       const subject = normaliseSubject(request.body?.subject);
       const message = String(request.body?.message || "").trim();
-      const recipientEmail = normaliseRecipientEmail(
-        request.body?.recipientEmail || request.body?.fields?.recipient_email
+      const requestedRecipientEmail =
+        request.body?.recipientEmail || request.body?.fields?.recipient_email;
+      const requestedRecipientEmails =
+        request.body?.recipientEmails || requestedRecipientEmail;
+      const appConfig = await getPublicAppConfig();
+      const recipientEmails = getConfiguredReportRecipientEmails(
+        appConfig,
+        reportType,
+        requestedRecipientEmails
       );
 
       const fields = toPlainObject(request.body?.fields);
@@ -2092,7 +2257,8 @@ exports.sendReport = onRequest(
         message,
         fields,
         formData,
-        recipientEmail,
+        recipientEmail: requestedRecipientEmail,
+        recipientEmails,
         attachments: request.body?.attachments,
       });
 
@@ -3037,7 +3203,10 @@ exports.dashboard = onRequest(
 
         if (action === "submitHazardDraft") {
           const hazardId = String(request.body?.hazardId || "").trim();
-          const recipientEmail = normaliseRecipientEmail(
+          const appConfig = await getPublicAppConfig();
+          const recipientEmails = getConfiguredReportRecipientEmails(
+            appConfig,
+            "Hazard ID",
             request.body?.recipientEmail
           );
 
@@ -3057,7 +3226,7 @@ exports.dashboard = onRequest(
           const result = await submitHazardDraftReport({
             hazardRef,
             hazardDoc,
-            recipientEmail,
+            recipientEmails,
           });
 
           response.status(200).json({

@@ -850,9 +850,39 @@ h2 {
   font-weight: 900;
 }
 
+.settings-section {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.settings-section > div {
+  grid-column: 1 / -1;
+}
+
+.settings-section h3 {
+  margin: 0 0 4px;
+  color: var(--accent);
+}
+
+.settings-section p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .settings-grid textarea {
   min-height: 120px;
   line-height: 1.35;
+}
+
+.report-recipient-settings textarea {
+  min-height: 86px;
 }
 
 .settings-grid .template-textarea {
@@ -1269,6 +1299,7 @@ h2 {
   .job-info-grid,
   .job-details-panel,
   .settings-grid,
+  .settings-section,
   .file-upload-row {
     grid-template-columns: 1fr;
   }
@@ -1335,6 +1366,11 @@ h2 {
     width: 100%;
     min-width: 0;
     font-size: 16px;
+  }
+
+  .settings-grid,
+  .settings-section {
+    grid-template-columns: 1fr;
   }
 
   .metrics {

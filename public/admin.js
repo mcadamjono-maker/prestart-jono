@@ -5,6 +5,15 @@ const JOB_INFO_ENDPOINT =
 const ACCESS_CODE_KEY = "wdl-dashboard-access-code";
 const CALENDAR_REFRESH_MS = 10000;
 const REPORT_STATUSES = ["New", "Reviewed", "Needs Action", "Filed", "Archived"];
+const REPORT_RECIPIENT_SETTINGS = [
+  { key: "prestart", selector: "#settingReportRecipientsPrestart" },
+  { key: "incident", selector: "#settingReportRecipientsIncident" },
+  { key: "confined", selector: "#settingReportRecipientsConfined" },
+  { key: "chargeup", selector: "#settingReportRecipientsChargeup" },
+  { key: "hazard", selector: "#settingReportRecipientsHazard" },
+  { key: "asbuilt", selector: "#settingReportRecipientsAsbuilt" },
+  { key: "default", selector: "#settingReportRecipientsDefault" },
+];
 let calendarRefreshTimer = null;
 
 const state = {
@@ -471,8 +480,12 @@ const renderMetrics = () => {
 const renderSettings = () => {
   const config = state.appConfig || {};
   const templates = config.checklistTemplates || {};
+  const reportRecipientEmails = config.reportRecipientEmails || {};
 
   setValue("#settingRecipientEmails", listToLines(config.recipientEmails || []));
+  REPORT_RECIPIENT_SETTINGS.forEach((setting) => {
+    setValue(setting.selector, listToLines(reportRecipientEmails[setting.key] || []));
+  });
   setValue("#settingExpiryWarningDays", config.expiryWarningDays || 30);
   setValue("#settingTruckChecklist", sectionsToText(templates.truck || []));
   setValue("#settingDiggerChecklist", sectionsToText(templates.digger || []));
@@ -1000,8 +1013,17 @@ const deleteSelectedJob = async () => {
 };
 
 const saveSettings = async () => {
+  const recipientEmails = linesToList($("#settingRecipientEmails").value);
+  const reportRecipientEmails = Object.fromEntries(
+    REPORT_RECIPIENT_SETTINGS.map((setting) => [
+      setting.key,
+      linesToList($(setting.selector).value),
+    ])
+  );
   const config = {
-    recipientEmails: linesToList($("#settingRecipientEmails").value),
+    recipientEmails,
+    defaultRecipientEmail: recipientEmails[0] || "",
+    reportRecipientEmails,
     expiryWarningDays: Number($("#settingExpiryWarningDays").value || 30),
     checklistTemplates: {
       truck: textToSections($("#settingTruckChecklist").value),

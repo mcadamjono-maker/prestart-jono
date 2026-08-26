@@ -139,6 +139,16 @@ const MACHINE_FIELD_LABELS = {
 
 const APP_TABS = [
   {
+    key: "jobinfo",
+    label: "Job Information",
+    description: "Plans, services, TMP, notes, and PO numbers",
+  },
+  {
+    key: "hazard",
+    label: "Hazard ID",
+    description: "Complete a site task analysis",
+  },
+  {
     key: "prestart",
     label: "Prestart Check",
     description: "Truck, ute, digger, and trailer checks",
@@ -149,19 +159,14 @@ const APP_TABS = [
     description: "Record an incident and email the details",
   },
   {
+    key: "confined",
+    label: "Confined Space Entry",
+    description: "Permit checks, gas readings, standby, and rescue plan",
+  },
+  {
     key: "chargeup",
     label: "Charge Up",
     description: "Record labour, plant, equipment, and materials",
-  },
-  {
-    key: "jobinfo",
-    label: "Job Information",
-    description: "Plans, services, TMP, notes, and PO numbers",
-  },
-  {
-    key: "hazard",
-    label: "Hazard ID",
-    description: "Complete a site task analysis",
   },
   {
     key: "calculators",
@@ -193,6 +198,60 @@ const RECIPIENT_EMAIL_OPTIONS = [
   "Brad@williamsdrainage.co.nz",
 ];
 const DEFAULT_EMAIL_RECIPIENT = RECIPIENT_EMAIL_OPTIONS[0];
+const REPORT_RECIPIENT_TYPES = [
+  {
+    key: "default",
+    label: "All Other Reports",
+    reportTypes: [],
+  },
+  {
+    key: "prestart",
+    label: "Prestart Checklists",
+    reportTypes: ["Prestart Checklist"],
+  },
+  {
+    key: "incident",
+    label: "Incident Reports",
+    reportTypes: ["Incident Report"],
+  },
+  {
+    key: "confined",
+    label: "Confined Space Entry",
+    reportTypes: ["Confined Space Entry Permit"],
+  },
+  {
+    key: "chargeup",
+    label: "Charge Ups",
+    reportTypes: ["Charge Up Job Record"],
+  },
+  {
+    key: "hazard",
+    label: "Hazard IDs",
+    reportTypes: ["Hazard ID"],
+  },
+  {
+    key: "asbuilt",
+    label: "As-Builts",
+    reportTypes: ["As-Built Plan"],
+  },
+  {
+    key: "purchase",
+    label: "Purchase Orders",
+    reportTypes: ["Purchase Order Request"],
+  },
+  {
+    key: "variation",
+    label: "Job Variations",
+    reportTypes: ["Job Variation Request"],
+  },
+];
+const DEFAULT_REPORT_RECIPIENT_EMAILS = REPORT_RECIPIENT_TYPES.reduce(
+  (output, reportConfig) => ({
+    ...output,
+    [reportConfig.key]: [DEFAULT_EMAIL_RECIPIENT],
+  }),
+  {}
+);
 const ALLOWED_RECIPIENT_EMAILS = RECIPIENT_EMAIL_OPTIONS.map((email) =>
   email.toLowerCase()
 );
@@ -278,6 +337,7 @@ const FILE_WRITE_TIMEOUT_MS = 15000;
 const PDF_EXPORT_TIMEOUT_MS = 30000;
 const REPORT_SEND_TIMEOUT_MS = 45000;
 const MAIL_COMPOSER_TIMEOUT_MS = 45000;
+const CONFINED_GAS_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const WEB_TOUCH_LOCK_STYLE = IS_WEB
   ? {
       touchAction: "none",
@@ -408,6 +468,19 @@ const HAZARD_CONTROL_OPTIONS = [
   "Access ways clear and tidy",
   "Qualified workers allocated",
   "Supervision arranged for inexperienced workers",
+];
+
+const CONFINED_SPACE_CHECKS = [
+  "Confined space entry permit authorised",
+  "Workers trained and briefed for confined space entry",
+  "Space isolated, locked out, and made safe",
+  "Atmosphere tested before entry",
+  "Continuous gas monitoring arranged",
+  "Forced ventilation in place where required",
+  "Standby person assigned outside the space",
+  "Reliable communication system checked",
+  "Rescue plan and equipment ready",
+  "No entry if readings or conditions change",
 ];
 
 const formatJobNumber = (value) => {
@@ -575,23 +648,28 @@ const normalizeChecklistTemplates = (templates) => {
 const normalizeAppConfig = (config) => {
   if (!config || typeof config !== "object") return null;
 
-  const recipientEmails = normalizeStringList(
+  const recipientEmails = normalizeRecipientEmailList(
     config.recipientEmails,
     RECIPIENT_EMAIL_OPTIONS
-  ).filter((email) => isValidEmailAddress(email) && isAllowedRecipientEmail(email));
+  );
+  const defaultRecipientEmail =
+    recipientEmails.find(
+      (email) =>
+        email.toLowerCase() ===
+        normalizeEmailAddress(config.defaultRecipientEmail).toLowerCase()
+    ) ||
+    recipientEmails[0] ||
+    DEFAULT_EMAIL_RECIPIENT;
 
   return {
     recipientEmails: recipientEmails.length
       ? recipientEmails
       : RECIPIENT_EMAIL_OPTIONS,
-    defaultRecipientEmail:
-      recipientEmails.find(
-        (email) =>
-          email.toLowerCase() ===
-          normalizeEmailAddress(config.defaultRecipientEmail).toLowerCase()
-      ) ||
-      recipientEmails[0] ||
-      DEFAULT_EMAIL_RECIPIENT,
+    defaultRecipientEmail,
+    reportRecipientEmails: normalizeReportRecipientEmails(
+      config.reportRecipientEmails,
+      defaultRecipientEmail
+    ),
     expiryWarningDays: Math.max(
       1,
       Math.min(120, Number(config.expiryWarningDays || 30))
@@ -627,6 +705,57 @@ const isAllowedRecipientEmail = (value) => {
   );
 };
 
+const normalizeRecipientEmailList = (value, fallback = RECIPIENT_EMAIL_OPTIONS) => {
+  const emails = normalizeStringList(value, [])
+    .filter((email) => isValidEmailAddress(email) && isAllowedRecipientEmail(email))
+    .reduce((output, email) => {
+      const lowerEmail = email.toLowerCase();
+
+      if (!output.some((existing) => existing.toLowerCase() === lowerEmail)) {
+        output.push(email);
+      }
+
+      return output;
+    }, []);
+
+  if (emails.length) return emails;
+
+  return normalizeStringList(fallback, [])
+    .filter((email) => isValidEmailAddress(email) && isAllowedRecipientEmail(email))
+    .slice(0, 12);
+};
+
+const getReportRecipientConfigKey = (reportType) => {
+  const normalizedReportType = String(reportType || "").trim().toLowerCase();
+  const matchedReport = REPORT_RECIPIENT_TYPES.find((reportConfig) =>
+    reportConfig.reportTypes.some(
+      (knownReportType) => knownReportType.toLowerCase() === normalizedReportType
+    )
+  );
+
+  return matchedReport?.key || "default";
+};
+
+const normalizeReportRecipientEmails = (
+  reportRecipientEmails,
+  defaultRecipientEmail
+) => {
+  const source =
+    reportRecipientEmails && typeof reportRecipientEmails === "object"
+      ? reportRecipientEmails
+      : DEFAULT_REPORT_RECIPIENT_EMAILS;
+  const fallback = [defaultRecipientEmail || DEFAULT_EMAIL_RECIPIENT];
+
+  return REPORT_RECIPIENT_TYPES.reduce((output, reportConfig) => {
+    output[reportConfig.key] = normalizeRecipientEmailList(
+      source[reportConfig.key],
+      fallback
+    );
+
+    return output;
+  }, {});
+};
+
 const getSubmittedAt = () =>
   new Date().toLocaleString("en-NZ", {
     dateStyle: "medium",
@@ -638,6 +767,14 @@ const getTodayDisplayDate = () =>
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+  });
+
+const getCurrentNzTime = () =>
+  new Date().toLocaleTimeString("en-NZ", {
+    timeZone: "Pacific/Auckland",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
   });
 
 const formatNzProgressDateTitle = (value = new Date()) => {
@@ -750,6 +887,14 @@ const formatFieldValue = (value, fallback = "N/A") => {
     ? cleanedValue
     : fallback;
 };
+
+const formatConfinedGasReadings = ({ oxygen, lel, h2s, co } = {}) =>
+  [
+    `O2 ${formatFieldValue(oxygen)}`,
+    `LEL ${formatFieldValue(lel)}`,
+    `H2S ${formatFieldValue(h2s)}`,
+    `CO ${formatFieldValue(co)}`,
+  ].join(" | ");
 
 const formatReportRow = ([label, value]) => {
   const formattedValue = formatFieldValue(value);
@@ -2287,6 +2432,36 @@ export default function App() {
   const [incidentDescription, setIncidentDescription] = useState("");
   const [incidentAction, setIncidentAction] = useState("");
   const [incidentPhotos, setIncidentPhotos] = useState([]);
+  const [selectedConfinedJob, setSelectedConfinedJob] = useState("");
+  const [isConfinedJobDropdownOpen, setIsConfinedJobDropdownOpen] =
+    useState(false);
+  const [confinedDate, setConfinedDate] = useState(getTodayDisplayDate);
+  const [confinedPermitIssuer, setConfinedPermitIssuer] = useState("");
+  const [confinedSupervisor, setConfinedSupervisor] = useState("");
+  const [confinedSpaceLocation, setConfinedSpaceLocation] = useState("");
+  const [confinedTaskDescription, setConfinedTaskDescription] = useState("");
+  const [confinedEntrants, setConfinedEntrants] = useState("");
+  const [confinedStandbyPerson, setConfinedStandbyPerson] = useState("");
+  const [confinedGasTester, setConfinedGasTester] = useState("");
+  const [confinedGasMonitor, setConfinedGasMonitor] = useState("");
+  const [confinedOxygen, setConfinedOxygen] = useState("");
+  const [confinedLel, setConfinedLel] = useState("");
+  const [confinedH2s, setConfinedH2s] = useState("");
+  const [confinedCo, setConfinedCo] = useState("");
+  const [confinedVentilation, setConfinedVentilation] = useState("");
+  const [confinedRescuePlan, setConfinedRescuePlan] = useState("");
+  const [confinedCommunication, setConfinedCommunication] = useState("");
+  const [confinedPpe, setConfinedPpe] = useState("");
+  const [confinedChecks, setConfinedChecks] = useState({});
+  const [confinedNotes, setConfinedNotes] = useState("");
+  const [confinedEntryLogName, setConfinedEntryLogName] = useState("");
+  const [confinedEntryLogEntryTime, setConfinedEntryLogEntryTime] =
+    useState(getCurrentNzTime);
+  const [confinedEntryLogExitTime, setConfinedEntryLogExitTime] = useState("");
+  const [confinedEntryLogNoGasChange, setConfinedEntryLogNoGasChange] =
+    useState(true);
+  const [confinedEntryLogNotes, setConfinedEntryLogNotes] = useState("");
+  const [confinedEntryLogs, setConfinedEntryLogs] = useState([]);
   const [poRequester, setPoRequester] = useState("");
   const [poSupplier, setPoSupplier] = useState("");
   const [poDetails, setPoDetails] = useState("");
@@ -2422,6 +2597,7 @@ export default function App() {
   const asBuiltSignaturePadRef = useRef(null);
   const hazardSignaturePointerRef = useRef(null);
   const asBuiltSignaturePointerRef = useRef(null);
+  const confinedGasReminderTimerRef = useRef(null);
 
   useEffect(() => {
     if (!IS_WEB || typeof document === "undefined") return undefined;
@@ -2494,6 +2670,14 @@ export default function App() {
     MACHINE_FIELD_LABELS[selectedTemplate] || "Machine ID / Rego";
   const activeRecipientEmail =
     normalizeEmailAddress(recipientEmail) || DEFAULT_EMAIL_RECIPIENT;
+  const getReportRecipientEmails = (reportType) => {
+    const reportKey = getReportRecipientConfigKey(reportType);
+
+    return normalizeRecipientEmailList(
+      appConfig?.reportRecipientEmails?.[reportKey],
+      [activeRecipientEmail]
+    );
+  };
   const fallCalculatorResults = useMemo(() => {
     const runMetres = parseCalculatorNumber(calculatorRunMetres);
     const fallMm = parseCalculatorNumber(calculatorFallMm);
@@ -2652,6 +2836,19 @@ export default function App() {
   }, [appConfig, selectedTemplate, wofExpiry, regoExpiry, rucExpiry]);
   const selectedPurchaseJobOption = jobOptions.find(
     (job) => job.number === selectedPurchaseJob
+  );
+  const selectedConfinedJobOption = jobOptions.find(
+    (job) => job.number === selectedConfinedJob
+  );
+  const openConfinedEntryLogs = useMemo(
+    () =>
+      confinedEntryLogs.filter(
+        (entryLog) =>
+          entryLog?.type === "entry" &&
+          String(entryLog?.entryTime || "").trim() &&
+          !String(entryLog?.exitTime || "").trim()
+      ),
+    [confinedEntryLogs]
   );
   const selectedChargeJobOption = jobOptions.find(
     (job) => job.number === selectedChargeJob
@@ -2822,6 +3019,9 @@ export default function App() {
       calcs: "calculators",
       prestart: "prestart",
       incident: "incident",
+      confined: "confined",
+      confinedspace: "confined",
+      "confined-space": "confined",
     };
     const nextPage = pageMap[action] || "menu";
 
@@ -2829,6 +3029,7 @@ export default function App() {
       setSelectedHazardJob(jobNumber);
       setSelectedChargeJob(jobNumber);
       setSelectedInfoJob(jobNumber);
+      setSelectedConfinedJob(jobNumber);
     }
 
     setActivePage(nextPage);
@@ -3392,6 +3593,250 @@ export default function App() {
     setIsPurchaseJobDropdownOpen(false);
   };
 
+  const resetConfinedSpaceForm = () => {
+    setSelectedConfinedJob("");
+    setIsConfinedJobDropdownOpen(false);
+    setConfinedDate(getTodayDisplayDate());
+    setConfinedPermitIssuer("");
+    setConfinedSupervisor("");
+    setConfinedSpaceLocation("");
+    setConfinedTaskDescription("");
+    setConfinedEntrants("");
+    setConfinedStandbyPerson("");
+    setConfinedGasTester("");
+    setConfinedGasMonitor("");
+    setConfinedOxygen("");
+    setConfinedLel("");
+    setConfinedH2s("");
+    setConfinedCo("");
+    setConfinedVentilation("");
+    setConfinedRescuePlan("");
+    setConfinedCommunication("");
+    setConfinedPpe("");
+    setConfinedChecks({});
+    setConfinedNotes("");
+    setConfinedEntryLogName("");
+    setConfinedEntryLogEntryTime(getCurrentNzTime());
+    setConfinedEntryLogExitTime("");
+    setConfinedEntryLogNoGasChange(true);
+    setConfinedEntryLogNotes("");
+    setConfinedEntryLogs([]);
+  };
+
+  const getConfinedGasSnapshot = () => ({
+    oxygen: confinedOxygen.trim(),
+    lel: confinedLel.trim(),
+    h2s: confinedH2s.trim(),
+    co: confinedCo.trim(),
+  });
+
+  const getOpenConfinedEntryNames = () =>
+    openConfinedEntryLogs
+      .map((entryLog) => entryLog.name)
+      .filter(Boolean)
+      .join(", ");
+
+  const addConfinedEntryLog = () => {
+    const name = confinedEntryLogName.trim();
+    const entryTime = confinedEntryLogEntryTime.trim();
+
+    if (!name) {
+      Alert.alert("Validation", "Please enter who is entering the space.");
+      return;
+    }
+
+    if (!entryTime) {
+      Alert.alert("Validation", "Please enter the entry time.");
+      return;
+    }
+
+    const gasSnapshot = getConfinedGasSnapshot();
+
+    setConfinedEntryLogs((currentLogs) => [
+      ...currentLogs,
+      {
+        id: `${Date.now()}-${currentLogs.length}`,
+        type: "entry",
+        name,
+        entryTime,
+        exitTime: confinedEntryLogExitTime.trim(),
+        noGasChanges: confinedEntryLogNoGasChange,
+        notes: confinedEntryLogNotes.trim(),
+        ...gasSnapshot,
+      },
+    ]);
+    setConfinedEntryLogName("");
+    setConfinedEntryLogEntryTime(getCurrentNzTime());
+    setConfinedEntryLogExitTime("");
+    setConfinedEntryLogNoGasChange(true);
+    setConfinedEntryLogNotes("");
+    Alert.alert("Saved", "Entry / exit log added.");
+  };
+
+  const recordConfinedGasCheck = ({ fromReminder = false } = {}) => {
+    if (openConfinedEntryLogs.length === 0) {
+      Alert.alert(
+        "No Open Entry",
+        "Add an entry log without an exit time before recording 10 minute gas checks."
+      );
+      return;
+    }
+
+    const gasSnapshot = getConfinedGasSnapshot();
+
+    setConfinedEntryLogs((currentLogs) => [
+      ...currentLogs,
+      {
+        id: `${Date.now()}-${currentLogs.length}`,
+        type: "gas-check",
+        name: getOpenConfinedEntryNames() || "Open confined space entry",
+        entryTime: getCurrentNzTime(),
+        exitTime: "",
+        noGasChanges: confinedEntryLogNoGasChange,
+        notes: fromReminder
+          ? "10 minute gas check reminder confirmed."
+          : confinedEntryLogNotes.trim(),
+        ...gasSnapshot,
+      },
+    ]);
+    setConfinedEntryLogNoGasChange(true);
+    setConfinedEntryLogNotes("");
+    Alert.alert("Saved", "10 minute gas check recorded.");
+  };
+
+  const closeConfinedEntryLog = (logId) => {
+    setConfinedEntryLogs((currentLogs) =>
+      currentLogs.map((entryLog) =>
+        entryLog.id === logId
+          ? {
+              ...entryLog,
+              exitTime: entryLog.exitTime || getCurrentNzTime(),
+            }
+          : entryLog
+      )
+    );
+    Alert.alert("Saved", "Exit time recorded.");
+  };
+
+  const removeConfinedEntryLog = (logId) => {
+    const removeLog = () => {
+      setConfinedEntryLogs((currentLogs) =>
+        currentLogs.filter((entryLog) => entryLog.id !== logId)
+      );
+      Alert.alert("Deleted", "Log row removed.");
+    };
+
+    if (
+      IS_WEB &&
+      typeof window !== "undefined" &&
+      typeof window.confirm === "function"
+    ) {
+      if (window.confirm("Delete this confined space log row?")) {
+        removeLog();
+      }
+
+      return;
+    }
+
+    Alert.alert("Delete Log Row?", "Are you sure you want to delete this row?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: removeLog },
+    ]);
+  };
+
+  const confirmConfinedOpenEntries = () =>
+    new Promise((resolve) => {
+      if (openConfinedEntryLogs.length === 0) {
+        resolve(true);
+        return;
+      }
+
+      const message =
+        "There are entry log rows without exit times. Submit the permit anyway?";
+
+      if (
+        IS_WEB &&
+        typeof window !== "undefined" &&
+        typeof window.confirm === "function"
+      ) {
+        resolve(window.confirm(`Open Entry Logs\n\n${message}`));
+        return;
+      }
+
+      Alert.alert("Open Entry Logs", message, [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "Submit Anyway", onPress: () => resolve(true) },
+      ]);
+    });
+
+  useEffect(() => {
+    if (confinedGasReminderTimerRef.current) {
+      clearInterval(confinedGasReminderTimerRef.current);
+      confinedGasReminderTimerRef.current = null;
+    }
+
+    if (
+      activePage !== "confined" ||
+      isSubmitting ||
+      openConfinedEntryLogs.length === 0
+    ) {
+      return undefined;
+    }
+
+    confinedGasReminderTimerRef.current = setInterval(() => {
+      const reminderMessage =
+        "Confirm gas readings are still safe. If anything has changed, update the readings first, untick no changes, then record the gas check.";
+
+      if (
+        IS_WEB &&
+        typeof window !== "undefined" &&
+        typeof window.confirm === "function"
+      ) {
+        if (
+          window.confirm(
+            `10 Minute Gas Check\n\n${reminderMessage}\n\nPress OK to log no changes, or Cancel to update the readings yourself.`
+          )
+        ) {
+          recordConfinedGasCheck({ fromReminder: true });
+        }
+
+        return;
+      }
+
+      Alert.alert(
+        "10 Minute Gas Check",
+        reminderMessage,
+        [
+          {
+            text: "No Changes",
+            onPress: () => recordConfinedGasCheck({ fromReminder: true }),
+          },
+          {
+            text: "I'll Update Readings",
+            style: "cancel",
+          },
+        ]
+      );
+    }, CONFINED_GAS_CHECK_INTERVAL_MS);
+
+    return () => {
+      if (confinedGasReminderTimerRef.current) {
+        clearInterval(confinedGasReminderTimerRef.current);
+        confinedGasReminderTimerRef.current = null;
+      }
+    };
+  }, [
+    activePage,
+    confinedCo,
+    confinedEntryLogNoGasChange,
+    confinedEntryLogNotes,
+    confinedH2s,
+    confinedLel,
+    confinedOxygen,
+    isSubmitting,
+    openConfinedEntryLogs.length,
+  ]);
+
   const resetChargeUpForm = () => {
     setSelectedChargeJob("");
     setIsChargeJobDropdownOpen(false);
@@ -3850,12 +4295,20 @@ export default function App() {
       photoList,
       photoFilenamePrefix
     );
+    const reportRecipientEmails = getReportRecipientEmails(reportType);
+    const recipientEmail =
+      reportRecipientEmails[0] || activeRecipientEmail || DEFAULT_EMAIL_RECIPIENT;
+    const fieldsWithRecipients = {
+      ...fields,
+      recipient_email: reportRecipientEmails.join(", ") || recipientEmail,
+    };
     const requestBody = {
-      recipientEmail: activeRecipientEmail,
+      recipientEmail,
+      recipientEmails: reportRecipientEmails,
       reportType,
       subject,
       message,
-      fields,
+      fields: fieldsWithRecipients,
       formData,
       attachments: [...attachments, ...extraAttachments],
     };
@@ -4327,8 +4780,8 @@ export default function App() {
     const targetNode =
       resolveWebDomNode(event?.currentTarget) ||
       resolveWebDomNode(nativeEvent.currentTarget) ||
-      resolveWebDomNode(event?.target?.closest?.("[data-wdl-signature-pad='true']")) ||
-      resolveWebDomNode(nativeEvent.target?.closest?.("[data-wdl-signature-pad='true']")) ||
+      resolveWebDomNode(event?.target?.closest?.("[data-wdl-signature-pad]")) ||
+      resolveWebDomNode(nativeEvent.target?.closest?.("[data-wdl-signature-pad]")) ||
       resolveWebDomNode(event?.target) ||
       resolveWebDomNode(nativeEvent.target) ||
       resolveWebDomNode(padRef);
@@ -4686,10 +5139,11 @@ export default function App() {
     }
 
     blockWebTouchEvent(event);
-    addSignaturePoint(
-      setStrokes,
-      getPoint(event, getPrimaryWebTouchSource(event))
-    );
+    const point = getPoint(event, getPrimaryWebTouchSource(event));
+
+    if (!point) return;
+
+    addSignaturePoint(setStrokes, point);
   };
 
   const endWebSignatureStroke = ({ event, pointerRef, setDrawing }) => {
@@ -4700,119 +5154,22 @@ export default function App() {
     setDrawing(false);
   };
 
-  const hazardSignatureWebHandlers = IS_WEB
-    ? {
-        onPointerDown: (event) => {
-          const nativeEvent = event.nativeEvent || {};
-          const pointerId =
-            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
-
-          if (nativeEvent.pointerId !== undefined) {
-            try {
-              event.currentTarget?.setPointerCapture?.(nativeEvent.pointerId);
-            } catch {
-              // Some synthetic/webview pointer events do not allow capture.
-            }
-          }
-          startWebSignatureStroke({
-            event,
-            pointerRef: hazardSignaturePointerRef,
-            getPoint: getSignaturePoint,
-            setStrokes: setHazardSignatureStrokes,
-            setDrawing: setIsDrawingSignature,
-            pointerId,
-          });
-        },
-        onPointerMove: (event) => {
-          const nativeEvent = event.nativeEvent || {};
-          const pointerId =
-            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
-
-          moveWebSignatureStroke({
-            event,
-            pointerRef: hazardSignaturePointerRef,
-            getPoint: getSignaturePoint,
-            setStrokes: setHazardSignatureStrokes,
-            expectedPointerId: pointerId,
-          });
-        },
-        onPointerUp: (event) =>
-          endWebSignatureStroke({
-            event,
-            pointerRef: hazardSignaturePointerRef,
-            setDrawing: setIsDrawingSignature,
-          }),
-        onPointerCancel: (event) =>
-          endWebSignatureStroke({
-            event,
-            pointerRef: hazardSignaturePointerRef,
-            setDrawing: setIsDrawingSignature,
-          }),
-      }
-    : {};
-
-  const asBuiltSignatureWebHandlers = IS_WEB
-    ? {
-        onPointerDown: (event) => {
-          const nativeEvent = event.nativeEvent || {};
-          const pointerId =
-            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
-
-          if (nativeEvent.pointerId !== undefined) {
-            try {
-              event.currentTarget?.setPointerCapture?.(nativeEvent.pointerId);
-            } catch {
-              // Some synthetic/webview pointer events do not allow capture.
-            }
-          }
-          startWebSignatureStroke({
-            event,
-            pointerRef: asBuiltSignaturePointerRef,
-            getPoint: getAsBuiltSignaturePoint,
-            setStrokes: setAsBuiltDrainlayerSignatureStrokes,
-            setDrawing: setIsDrawingAsBuiltSignature,
-            pointerId,
-          });
-        },
-        onPointerMove: (event) => {
-          const nativeEvent = event.nativeEvent || {};
-          const pointerId =
-            nativeEvent.pointerId ?? `${nativeEvent.pointerType || "mouse"}-pointer`;
-
-          moveWebSignatureStroke({
-            event,
-            pointerRef: asBuiltSignaturePointerRef,
-            getPoint: getAsBuiltSignaturePoint,
-            setStrokes: setAsBuiltDrainlayerSignatureStrokes,
-            expectedPointerId: pointerId,
-          });
-        },
-        onPointerUp: (event) =>
-          endWebSignatureStroke({
-            event,
-            pointerRef: asBuiltSignaturePointerRef,
-            setDrawing: setIsDrawingAsBuiltSignature,
-          }),
-        onPointerCancel: (event) =>
-          endWebSignatureStroke({
-            event,
-            pointerRef: asBuiltSignaturePointerRef,
-            setDrawing: setIsDrawingAsBuiltSignature,
-          }),
-      }
-    : {};
-
   useEffect(() => {
     if (!IS_WEB) return undefined;
 
     const bindTouchSignaturePad = ({
       ref,
+      padKey,
       pointerRef,
       getPoint,
       setStrokes,
       setDrawing,
     }) => {
-      const node = resolveWebDomNode(ref);
+      const node =
+        resolveWebDomNode(ref) ||
+        (typeof document !== "undefined" && padKey
+          ? document.querySelector(`[data-wdl-signature-pad="${padKey}"]`)
+          : null);
 
       if (!node) return () => {};
 
@@ -4842,23 +5199,74 @@ export default function App() {
           pointerRef,
           setDrawing,
         });
+      const getPointerId = (event) =>
+        event.pointerId ?? `${event.pointerType || "mouse"}-pointer`;
+      const onPointerStart = (event) => {
+        if (event.pointerType === "touch") return;
+
+        const pointerId = getPointerId(event);
+
+        try {
+          node.setPointerCapture?.(event.pointerId);
+        } catch {
+          // Some webviews do not allow pointer capture.
+        }
+
+        startWebSignatureStroke({
+          event,
+          pointerRef,
+          getPoint,
+          setStrokes,
+          setDrawing,
+          pointerId,
+        });
+      };
+      const onPointerMove = (event) => {
+        if (event.pointerType === "touch") return;
+
+        moveWebSignatureStroke({
+          event,
+          pointerRef,
+          getPoint,
+          setStrokes,
+          expectedPointerId: getPointerId(event),
+        });
+      };
+      const onPointerEnd = (event) => {
+        if (event.pointerType === "touch") return;
+
+        endWebSignatureStroke({
+          event,
+          pointerRef,
+          setDrawing,
+        });
+      };
       const options = { passive: false };
 
       node.addEventListener("touchstart", onTouchStart, options);
       node.addEventListener("touchmove", onTouchMove, options);
       node.addEventListener("touchend", onTouchEnd, options);
       node.addEventListener("touchcancel", onTouchEnd, options);
+      node.addEventListener("pointerdown", onPointerStart, options);
+      node.addEventListener("pointermove", onPointerMove, options);
+      node.addEventListener("pointerup", onPointerEnd, options);
+      node.addEventListener("pointercancel", onPointerEnd, options);
 
       return () => {
         node.removeEventListener("touchstart", onTouchStart, options);
         node.removeEventListener("touchmove", onTouchMove, options);
         node.removeEventListener("touchend", onTouchEnd, options);
         node.removeEventListener("touchcancel", onTouchEnd, options);
+        node.removeEventListener("pointerdown", onPointerStart, options);
+        node.removeEventListener("pointermove", onPointerMove, options);
+        node.removeEventListener("pointerup", onPointerEnd, options);
+        node.removeEventListener("pointercancel", onPointerEnd, options);
       };
     };
 
     const unbindHazardPad = bindTouchSignaturePad({
       ref: hazardSignaturePadRef,
+      padKey: "hazard",
       pointerRef: hazardSignaturePointerRef,
       getPoint: getSignaturePoint,
       setStrokes: setHazardSignatureStrokes,
@@ -4866,6 +5274,7 @@ export default function App() {
     });
     const unbindAsBuiltPad = bindTouchSignaturePad({
       ref: asBuiltSignaturePadRef,
+      padKey: "asbuilt",
       pointerRef: asBuiltSignaturePointerRef,
       getPoint: getAsBuiltSignaturePoint,
       setStrokes: setAsBuiltDrainlayerSignatureStrokes,
@@ -5448,7 +5857,7 @@ export default function App() {
       }
 
       const mailResult = await composeMailWithTimeout({
-        recipients: [activeRecipientEmail],
+        recipients: getReportRecipientEmails("As-Built Plan"),
         subject,
         body: message,
         attachments: [planAttachment.uri],
@@ -5558,7 +5967,7 @@ export default function App() {
         }
 
         const mailResult = await composeMailWithTimeout({
-          recipients: [activeRecipientEmail],
+          recipients: getReportRecipientEmails("Prestart Checklist"),
           subject,
           body: message,
           attachments: photoAttachments,
@@ -5690,7 +6099,7 @@ export default function App() {
         }
 
         const mailResult = await composeMailWithTimeout({
-          recipients: [activeRecipientEmail],
+          recipients: getReportRecipientEmails("Incident Report"),
           subject,
           body: message,
           attachments: incidentPhotoAttachments,
@@ -5720,7 +6129,7 @@ export default function App() {
         }
 
         const mailResult = await composeMailWithTimeout({
-          recipients: [activeRecipientEmail],
+          recipients: getReportRecipientEmails("Incident Report"),
           subject,
           body: message,
         });
@@ -5737,6 +6146,260 @@ export default function App() {
         successMessage
       );
       resetIncidentForm();
+    } catch (error) {
+      Alert.alert("Email Failed", getEmailErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const submitConfinedSpaceEntry = async () => {
+    if (!selectedConfinedJob) {
+      Alert.alert("Validation", "Please select the job.");
+      return;
+    }
+
+    if (!confinedSpaceLocation.trim()) {
+      Alert.alert("Validation", "Please enter the confined space location.");
+      return;
+    }
+
+    if (!confinedTaskDescription.trim()) {
+      Alert.alert("Validation", "Please describe the work being done.");
+      return;
+    }
+
+    if (!confinedPermitIssuer.trim()) {
+      Alert.alert("Validation", "Please enter who authorised the entry.");
+      return;
+    }
+
+    if (!confinedEntrants.trim()) {
+      Alert.alert("Validation", "Please enter the entrants.");
+      return;
+    }
+
+    if (!confinedStandbyPerson.trim()) {
+      Alert.alert("Validation", "Please enter the standby person.");
+      return;
+    }
+
+    if (
+      !confinedGasTester.trim() ||
+      !confinedOxygen.trim() ||
+      !confinedLel.trim() ||
+      !confinedH2s.trim() ||
+      !confinedCo.trim()
+    ) {
+      Alert.alert(
+        "Validation",
+        "Please enter the gas tester and atmospheric readings before entry."
+      );
+      return;
+    }
+
+    const missingRequiredChecks = CONFINED_SPACE_CHECKS.filter(
+      (item) => !confinedChecks[item]
+    );
+
+    if (missingRequiredChecks.length > 0) {
+      Alert.alert(
+        "Validation",
+        "Please complete every confined space control check before submitting."
+      );
+      return;
+    }
+
+    if (!confinedEntryLogs.some((entryLog) => entryLog.type === "entry")) {
+      Alert.alert(
+        "Validation",
+        "Please add at least one entry / exit log row before submitting."
+      );
+      return;
+    }
+
+    if (!(await confirmConfinedOpenEntries())) return;
+
+    if (!(await confirmEmailSubmit("confined space entry permit"))) return;
+
+    setIsSubmitting(true);
+
+    try {
+      const selectedChecks = CONFINED_SPACE_CHECKS.filter(
+        (item) => confinedChecks[item]
+      );
+      const missingChecks = CONFINED_SPACE_CHECKS.filter(
+        (item) => !confinedChecks[item]
+      );
+      const jobName = selectedConfinedJobOption?.name || selectedConfinedJob;
+      const gasReadingRows = [
+        ["Oxygen %", confinedOxygen.trim() || "N/A"],
+        ["LEL %", confinedLel.trim() || "N/A"],
+        ["H2S ppm", confinedH2s.trim() || "N/A"],
+        ["CO ppm", confinedCo.trim() || "N/A"],
+        ["Gas Tester", confinedGasTester.trim() || "N/A"],
+        ["Gas Monitor / Calibration", confinedGasMonitor.trim() || "N/A"],
+      ];
+      const entryLogRows = confinedEntryLogs.map((entryLog, index) => [
+        `${entryLog.type === "gas-check" ? "Gas Check" : "Entry / Exit"} ${
+          index + 1
+        }`,
+        [
+          `Name: ${formatFieldValue(entryLog.name)}`,
+          `Entry / Check Time: ${formatFieldValue(entryLog.entryTime)}`,
+          `Exit Time: ${formatFieldValue(entryLog.exitTime)}`,
+          `No Changes In Gas Readings: ${
+            entryLog.noGasChanges ? "Yes" : "No"
+          }`,
+          `Readings: ${formatConfinedGasReadings(entryLog)}`,
+          `Notes: ${formatFieldValue(entryLog.notes)}`,
+        ].join("\n"),
+      ]);
+      const subject = `Confined space entry permit - ${jobName}`;
+      const message = buildFiledEmail({
+        title: "Confined Space Entry Permit",
+        reference: jobName,
+        sections: [
+          {
+            title: "Permit Details",
+            rows: [
+              ["Job Name", selectedConfinedJobOption?.name],
+              ["Job Number", selectedConfinedJob],
+              ["Date", confinedDate.trim()],
+              ["Space / Location", confinedSpaceLocation.trim()],
+              ["Task", confinedTaskDescription.trim()],
+              ["Authorised By", confinedPermitIssuer.trim()],
+              ["Supervisor", confinedSupervisor.trim() || "N/A"],
+            ],
+          },
+          {
+            title: "People",
+            rows: [
+              ["Entrants", confinedEntrants.trim()],
+              ["Standby Person", confinedStandbyPerson.trim()],
+            ],
+          },
+          {
+            title: "Atmospheric Testing",
+            rows: gasReadingRows,
+          },
+          {
+            title: "Entry / Exit and Gas Check Log",
+            rows: entryLogRows,
+          },
+          {
+            title: "Controls",
+            rows: [
+              [
+                "Selected Controls",
+                selectedChecks.length ? selectedChecks.join("\n") : "None selected",
+              ],
+              [
+                "Unselected Controls",
+                missingChecks.length ? missingChecks.join("\n") : "None",
+              ],
+              ["Ventilation", confinedVentilation.trim() || "N/A"],
+              ["Rescue Plan", confinedRescuePlan.trim() || "N/A"],
+              ["Communication", confinedCommunication.trim() || "N/A"],
+              ["PPE / RPE", confinedPpe.trim() || "N/A"],
+              ["Notes", confinedNotes.trim() || "N/A"],
+            ],
+          },
+        ],
+      });
+      const fields = {
+        report_type: "Confined Space Entry Permit",
+        template: "confined_space_entry",
+        job_number: selectedConfinedJob,
+        job_name: selectedConfinedJobOption?.name || "",
+        date: confinedDate.trim() || "N/A",
+        space_location: confinedSpaceLocation.trim(),
+        task_description: confinedTaskDescription.trim(),
+        authorised_by: confinedPermitIssuer.trim(),
+        supervisor: confinedSupervisor.trim() || "N/A",
+        entrants: confinedEntrants.trim(),
+        standby_person: confinedStandbyPerson.trim(),
+        oxygen_percent: confinedOxygen.trim() || "N/A",
+        lel_percent: confinedLel.trim() || "N/A",
+        h2s_ppm: confinedH2s.trim() || "N/A",
+        co_ppm: confinedCo.trim() || "N/A",
+        gas_tester: confinedGasTester.trim() || "N/A",
+        gas_monitor: confinedGasMonitor.trim() || "N/A",
+        entry_exit_log: entryLogRows
+          .map(([label, value]) => `${label}\n${value}`)
+          .join("\n\n"),
+        selected_controls: selectedChecks.join("\n") || "None selected",
+        ventilation: confinedVentilation.trim() || "N/A",
+        rescue_plan: confinedRescuePlan.trim() || "N/A",
+        communication: confinedCommunication.trim() || "N/A",
+        ppe_rpe: confinedPpe.trim() || "N/A",
+        notes: confinedNotes.trim() || "N/A",
+        operator: confinedPermitIssuer.trim(),
+        machine: selectedConfinedJob,
+        answers: selectedChecks.join("\n"),
+      };
+
+      const sentByFirebase = await sendFirebaseReport({
+        reportType: "Confined Space Entry Permit",
+        subject,
+        message,
+        fields,
+        formData: {
+          jobNumber: selectedConfinedJob,
+          jobName: selectedConfinedJobOption?.name || "",
+          date: confinedDate.trim(),
+          spaceLocation: confinedSpaceLocation.trim(),
+          taskDescription: confinedTaskDescription.trim(),
+          authorisedBy: confinedPermitIssuer.trim(),
+          supervisor: confinedSupervisor.trim(),
+          entrants: confinedEntrants.trim(),
+          standbyPerson: confinedStandbyPerson.trim(),
+          gasReadings: {
+            oxygen: confinedOxygen.trim(),
+            lel: confinedLel.trim(),
+            h2s: confinedH2s.trim(),
+            co: confinedCo.trim(),
+          },
+          entryLogs: confinedEntryLogs,
+          selectedControls: selectedChecks,
+          ventilation: confinedVentilation.trim(),
+          rescuePlan: confinedRescuePlan.trim(),
+          communication: confinedCommunication.trim(),
+          ppe: confinedPpe.trim(),
+          notes: confinedNotes.trim(),
+        },
+      });
+
+      if (!sentByFirebase) {
+        const canCompose = await MailComposer.isAvailableAsync();
+
+        if (!canCompose) {
+          Alert.alert(
+            "Email App Required",
+            "To send a confined space entry permit, this device needs an email app set up."
+          );
+          return;
+        }
+
+        const mailResult = await composeMailWithTimeout({
+          recipients: getReportRecipientEmails("Confined Space Entry Permit"),
+          subject,
+          body: message,
+        });
+
+        if (mailResult.status === "cancelled") {
+          return;
+        }
+      }
+
+      Alert.alert(
+        sentByFirebase === "queued" ? "Saved To Outbox" : "Success",
+        getDeliverySuccessMessage(
+          sentByFirebase,
+          "Confined space entry permit emailed successfully."
+        )
+      );
+      resetConfinedSpaceForm();
     } catch (error) {
       Alert.alert("Email Failed", getEmailErrorMessage(error));
     } finally {
@@ -5869,7 +6532,7 @@ export default function App() {
         }
 
         const mailResult = await composeMailWithTimeout({
-          recipients: [activeRecipientEmail],
+          recipients: getReportRecipientEmails("Charge Up Job Record"),
           subject,
           body: message,
           attachments: chargePhotoAttachments,
@@ -5988,7 +6651,7 @@ export default function App() {
         }
 
         const mailResult = await composeMailWithTimeout({
-          recipients: [activeRecipientEmail],
+          recipients: getReportRecipientEmails("Purchase Order Request"),
           subject,
           body: message,
         });
@@ -6118,7 +6781,7 @@ export default function App() {
       }
 
       const mailResult = await composeMailWithTimeout({
-        recipients: [activeRecipientEmail],
+        recipients: getReportRecipientEmails("Job Variation Request"),
         subject,
         body: message,
         attachments:
@@ -6573,8 +7236,8 @@ export default function App() {
                 !isDrawingAsBuiltSignature &&
                 !isAdjustingAsBuiltMap
               }
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="always"
+              keyboardDismissMode="none"
             >
           <View style={styles.logoContainer}>
             <Image
@@ -7118,6 +7781,445 @@ export default function App() {
                   <ActivityIndicator color="#000" />
                 ) : (
                   <Text style={styles.submitText}>SUBMIT INCIDENT</Text>
+                )}
+              </Pressable>
+            </>
+          )}
+
+          {activePage === "confined" && (
+            <>
+              <View style={styles.pageHeader}>
+                <Text style={styles.pageTitle}>Confined Space Entry</Text>
+                <Text style={styles.pageSubtitle}>
+                  Record permit authority, gas readings, standby, rescue, and entry controls.
+                </Text>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.inputLabel}>Job</Text>
+                <StableJobSelect
+                  selectedJobNumber={selectedConfinedJob}
+                  selectedJobOption={selectedConfinedJobOption}
+                  isOpen={isConfinedJobDropdownOpen}
+                  setIsOpen={setIsConfinedJobDropdownOpen}
+                  onSelectJob={setSelectedConfinedJob}
+                  jobOptions={jobOptions}
+                  isSubmitting={isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Date"
+                  value={confinedDate}
+                  onChangeText={setConfinedDate}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Space / Location"
+                  value={confinedSpaceLocation}
+                  onChangeText={setConfinedSpaceLocation}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Task Description"
+                  placeholder="Describe the work inside the confined space..."
+                  multiline
+                  style={styles.notes}
+                  value={confinedTaskDescription}
+                  onChangeText={setConfinedTaskDescription}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <View style={styles.inputGap} />
+
+                <StableLabeledInput
+                  label="Authorised By"
+                  value={confinedPermitIssuer}
+                  onChangeText={setConfinedPermitIssuer}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Supervisor"
+                  value={confinedSupervisor}
+                  onChangeText={setConfinedSupervisor}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Entrants"
+                  placeholder="Names of people entering..."
+                  multiline
+                  style={styles.notes}
+                  value={confinedEntrants}
+                  onChangeText={setConfinedEntrants}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <View style={styles.inputGap} />
+
+                <StableLabeledInput
+                  label="Standby Person"
+                  value={confinedStandbyPerson}
+                  onChangeText={setConfinedStandbyPerson}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.formSectionTitle}>Atmospheric Testing</Text>
+
+                <StableLabeledInput
+                  label="Gas Tester"
+                  value={confinedGasTester}
+                  onChangeText={setConfinedGasTester}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Gas Monitor / Calibration"
+                  value={confinedGasMonitor}
+                  onChangeText={setConfinedGasMonitor}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Oxygen %"
+                  value={confinedOxygen}
+                  onChangeText={setConfinedOxygen}
+                  commitOnChange
+                  keyboardType="decimal-pad"
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="LEL %"
+                  value={confinedLel}
+                  onChangeText={setConfinedLel}
+                  commitOnChange
+                  keyboardType="decimal-pad"
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="H2S ppm"
+                  value={confinedH2s}
+                  onChangeText={setConfinedH2s}
+                  commitOnChange
+                  keyboardType="decimal-pad"
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="CO ppm"
+                  value={confinedCo}
+                  onChangeText={setConfinedCo}
+                  commitOnChange
+                  keyboardType="decimal-pad"
+                  editable={!isSubmitting}
+                />
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.formSectionTitle}>Entry / Exit Log</Text>
+                <Text style={styles.settingsHelpText}>
+                  Add a row when someone enters. Leave exit time blank while they
+                  are inside, then use Exit Now when they are out. The app will
+                  remind you every 10 minutes while an entry is open.
+                </Text>
+
+                <StableLabeledInput
+                  label="Name(s)"
+                  value={confinedEntryLogName}
+                  onChangeText={setConfinedEntryLogName}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Entry Time"
+                  value={confinedEntryLogEntryTime}
+                  onChangeText={setConfinedEntryLogEntryTime}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="Exit Time"
+                  placeholder="Leave blank while inside"
+                  value={confinedEntryLogExitTime}
+                  onChangeText={setConfinedEntryLogExitTime}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <Pressable
+                  style={styles.checkboxRow}
+                  onPress={() =>
+                    setConfinedEntryLogNoGasChange(
+                      (currentValue) => !currentValue
+                    )
+                  }
+                  disabled={isSubmitting}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: confinedEntryLogNoGasChange }}
+                >
+                  <View
+                    style={[
+                      styles.checkboxBox,
+                      confinedEntryLogNoGasChange && styles.checkboxBoxChecked,
+                    ]}
+                  >
+                    {confinedEntryLogNoGasChange && (
+                      <View style={styles.checkboxTickIcon}>
+                        <View style={styles.checkboxTickShort} />
+                        <View style={styles.checkboxTickLong} />
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.checkboxText}>
+                    No changes in gas readings
+                  </Text>
+                </Pressable>
+
+                <StableLabeledInput
+                  label="Log Notes"
+                  placeholder="Reason for change, retest notes, or rescue standby notes..."
+                  multiline
+                  style={styles.notes}
+                  value={confinedEntryLogNotes}
+                  onChangeText={setConfinedEntryLogNotes}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <View style={styles.signOnActions}>
+                  <Pressable
+                    style={[
+                      styles.hazardSaveButton,
+                      isSubmitting && styles.disabledButton,
+                    ]}
+                    onPress={addConfinedEntryLog}
+                    disabled={isSubmitting}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.hazardSaveButtonText}>
+                      ADD ENTRY / EXIT LOG
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.secondaryButton,
+                      (isSubmitting || openConfinedEntryLogs.length === 0) &&
+                        styles.disabledButton,
+                    ]}
+                    onPress={() => recordConfinedGasCheck()}
+                    disabled={isSubmitting || openConfinedEntryLogs.length === 0}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      RECORD 10 MIN GAS CHECK
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.confinedLogList}>
+                  {confinedEntryLogs.length === 0 ? (
+                    <Text style={styles.emptyJobText}>
+                      No entry or gas check rows recorded yet.
+                    </Text>
+                  ) : (
+                    confinedEntryLogs.map((entryLog, index) => {
+                      const isEntry = entryLog.type === "entry";
+                      const isOpenEntry =
+                        isEntry &&
+                        entryLog.entryTime &&
+                        !entryLog.exitTime;
+
+                      return (
+                        <View key={entryLog.id} style={styles.confinedLogItem}>
+                          <View style={styles.confinedLogHeader}>
+                            <Text style={styles.confinedLogTitle}>
+                              {isEntry ? "Entry / Exit" : "Gas Check"} #{index + 1}
+                            </Text>
+                            {isOpenEntry && (
+                              <Text style={styles.confinedLogBadge}>OPEN</Text>
+                            )}
+                          </View>
+                          <Text style={styles.confinedLogText}>
+                            {entryLog.name || "N/A"}
+                          </Text>
+                          <Text style={styles.confinedLogMeta}>
+                            Entry / Check: {entryLog.entryTime || "N/A"} | Exit:{" "}
+                            {entryLog.exitTime || "N/A"}
+                          </Text>
+                          <Text style={styles.confinedLogMeta}>
+                            No gas changes:{" "}
+                            {entryLog.noGasChanges ? "Yes" : "No"}
+                          </Text>
+                          <Text style={styles.confinedLogMeta}>
+                            {formatConfinedGasReadings(entryLog)}
+                          </Text>
+                          {!!entryLog.notes && (
+                            <Text style={styles.confinedLogText}>
+                              {entryLog.notes}
+                            </Text>
+                          )}
+
+                          <View style={styles.confinedLogActions}>
+                            {isOpenEntry && (
+                              <Pressable
+                                style={styles.confinedSmallButton}
+                                onPress={() =>
+                                  closeConfinedEntryLog(entryLog.id)
+                                }
+                                disabled={isSubmitting}
+                                accessibilityRole="button"
+                              >
+                                <Text style={styles.confinedSmallButtonText}>
+                                  EXIT NOW
+                                </Text>
+                              </Pressable>
+                            )}
+                            <Pressable
+                              style={[
+                                styles.confinedSmallButton,
+                                styles.confinedDeleteButton,
+                              ]}
+                              onPress={() => removeConfinedEntryLog(entryLog.id)}
+                              disabled={isSubmitting}
+                              accessibilityRole="button"
+                            >
+                              <Text style={styles.confinedSmallButtonText}>
+                                DELETE
+                              </Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.formSectionTitle}>Entry Controls</Text>
+                <View style={styles.optionGrid}>
+                  {CONFINED_SPACE_CHECKS.map((item) => {
+                    const isSelected = !!confinedChecks[item];
+
+                    return (
+                      <Pressable
+                        key={item}
+                        style={[
+                          styles.optionButton,
+                          isSelected && styles.optionButtonSelected,
+                          isSubmitting && styles.disabledControl,
+                        ]}
+                        onPress={() =>
+                          toggleSelectedItem(setConfinedChecks, item)
+                        }
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <Text
+                          style={[
+                            styles.optionButtonText,
+                            isSelected && styles.optionButtonTextSelected,
+                          ]}
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <StableLabeledInput
+                  label="Ventilation"
+                  placeholder="Blower, natural ventilation, retesting notes..."
+                  multiline
+                  style={styles.notes}
+                  value={confinedVentilation}
+                  onChangeText={setConfinedVentilation}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <View style={styles.inputGap} />
+
+                <StableLabeledInput
+                  label="Rescue Plan"
+                  placeholder="Rescue equipment, method, emergency contacts..."
+                  multiline
+                  style={styles.notes}
+                  value={confinedRescuePlan}
+                  onChangeText={setConfinedRescuePlan}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <View style={styles.inputGap} />
+
+                <StableLabeledInput
+                  label="Communication"
+                  value={confinedCommunication}
+                  onChangeText={setConfinedCommunication}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <StableLabeledInput
+                  label="PPE / RPE"
+                  placeholder="Harness, tripod, gas monitor, gloves, RPE..."
+                  multiline
+                  style={styles.notes}
+                  value={confinedPpe}
+                  onChangeText={setConfinedPpe}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+
+                <View style={styles.inputGap} />
+
+                <StableLabeledInput
+                  label="Notes"
+                  placeholder="Extra hazards, limits, stop-work notes..."
+                  multiline
+                  style={styles.notes}
+                  value={confinedNotes}
+                  onChangeText={setConfinedNotes}
+                  commitOnChange
+                  editable={!isSubmitting}
+                />
+              </View>
+
+              <Pressable
+                style={[
+                  styles.submitButton,
+                  isSubmitting && styles.disabledButton,
+                ]}
+                onPress={submitConfinedSpaceEntry}
+                disabled={isSubmitting}
+                accessibilityRole="button"
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.submitText}>
+                    SUBMIT ENTRY PERMIT
+                  </Text>
                 )}
               </Pressable>
             </>
@@ -7713,7 +8815,7 @@ export default function App() {
                       ref={hazardSignaturePadRef}
                       style={styles.signaturePad}
                       dataSet={{
-                        wdlSignaturePad: "true",
+                        wdlSignaturePad: "hazard",
                         wdlTouchLock: "true",
                       }}
                       onLayout={(event) => {
@@ -7721,9 +8823,7 @@ export default function App() {
 
                         setSignaturePadSize({ width, height });
                       }}
-                      {...(IS_WEB
-                        ? hazardSignatureWebHandlers
-                        : signaturePanResponder.panHandlers)}
+                      {...(IS_WEB ? {} : signaturePanResponder.panHandlers)}
                     >
                       <StableSignatureInk strokes={hazardSignatureStrokes} />
                     </View>
@@ -8470,7 +9570,7 @@ export default function App() {
                   ref={asBuiltSignaturePadRef}
                   style={styles.signaturePad}
                   dataSet={{
-                    wdlSignaturePad: "true",
+                    wdlSignaturePad: "asbuilt",
                     wdlTouchLock: "true",
                   }}
                   onLayout={(event) => {
@@ -8478,9 +9578,7 @@ export default function App() {
 
                     setAsBuiltSignaturePadSize({ width, height });
                   }}
-                  {...(IS_WEB
-                    ? asBuiltSignatureWebHandlers
-                    : asBuiltSignaturePanResponder.panHandlers)}
+                  {...(IS_WEB ? {} : asBuiltSignaturePanResponder.panHandlers)}
                 >
                   <StableSignatureInk
                     strokes={asBuiltDrainlayerSignatureStrokes}
@@ -9573,6 +10671,84 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  confinedLogList: {
+    gap: 10,
+    marginTop: 14,
+  },
+
+  confinedLogItem: {
+    backgroundColor: "rgba(0,0,0,0.48)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    padding: 12,
+  },
+
+  confinedLogHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+  },
+
+  confinedLogTitle: {
+    color: "#D7FF2F",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  confinedLogBadge: {
+    color: "#000",
+    backgroundColor: "#D7FF2F",
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+  },
+
+  confinedLogText: {
+    color: "#fff",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700",
+  },
+
+  confinedLogMeta: {
+    color: "#c9c9c9",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 2,
+  },
+
+  confinedLogActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+    flexWrap: "wrap",
+  },
+
+  confinedSmallButton: {
+    backgroundColor: "#111",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.46)",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+
+  confinedDeleteButton: {
+    borderColor: "rgba(255,68,68,0.56)",
+  },
+
+  confinedSmallButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
   },
 
   confirmSignOnButton: {
