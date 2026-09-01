@@ -37,6 +37,10 @@
           <p>Charge ups</p>
         </article>
         <article>
+          <span id="confinedCount">0</span>
+          <p>Confined spaces</p>
+        </article>
+        <article>
           <span id="hazardCount">0</span>
           <p>Hazard IDs</p>
         </article>
@@ -66,6 +70,7 @@
               <option value="">All types</option>
               <option>Prestart Checklist</option>
               <option>Incident Report</option>
+              <option>Confined Space Entry Permit</option>
               <option>Charge Up Job Record</option>
               <option>Hazard ID</option>
               <option>As-Built Plan</option>
@@ -238,37 +243,25 @@
             <div>
               <h3>Report Recipients</h3>
               <p>
-                Add one or more emails for each report type. Leave a box blank to use the first
-                receiving email above.
+                Choose the form type, then add one or more receiving emails for that form.
+                Leave it blank to use the first receiving email above.
               </p>
             </div>
             <label>
-              Prestart Checklists
-              <textarea id="settingReportRecipientsPrestart" placeholder="One email per line"></textarea>
+              Form To Edit
+              <select id="settingReportRecipientType">
+                <option value="prestart">Prestart Checklists</option>
+                <option value="hazard">Hazard IDs</option>
+                <option value="incident">Incident Reports</option>
+                <option value="confined">Confined Space Entry</option>
+                <option value="chargeup">Charge Ups</option>
+                <option value="asbuilt">As-Builts</option>
+                <option value="default">All Other Reports</option>
+              </select>
             </label>
-            <label>
-              Incident Reports
-              <textarea id="settingReportRecipientsIncident" placeholder="One email per line"></textarea>
-            </label>
-            <label>
-              Confined Space Entry
-              <textarea id="settingReportRecipientsConfined" placeholder="One email per line"></textarea>
-            </label>
-            <label>
-              Charge Ups
-              <textarea id="settingReportRecipientsChargeup" placeholder="One email per line"></textarea>
-            </label>
-            <label>
-              Hazard IDs
-              <textarea id="settingReportRecipientsHazard" placeholder="One email per line"></textarea>
-            </label>
-            <label>
-              As-Builts
-              <textarea id="settingReportRecipientsAsbuilt" placeholder="One email per line"></textarea>
-            </label>
-            <label>
-              All Other Reports
-              <textarea id="settingReportRecipientsDefault" placeholder="One email per line"></textarea>
+            <label class="report-recipient-editor">
+              Emails For <span id="settingReportRecipientTitle">Selected Form</span>
+              <textarea id="settingReportRecipientEmails" placeholder="One email per line"></textarea>
             </label>
           </div>
           <label>

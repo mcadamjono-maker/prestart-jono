@@ -6,13 +6,13 @@ const ACCESS_CODE_KEY = "wdl-dashboard-access-code";
 const CALENDAR_REFRESH_MS = 10000;
 const REPORT_STATUSES = ["New", "Reviewed", "Needs Action", "Filed", "Archived"];
 const REPORT_RECIPIENT_SETTINGS = [
-  { key: "prestart", selector: "#settingReportRecipientsPrestart" },
-  { key: "incident", selector: "#settingReportRecipientsIncident" },
-  { key: "confined", selector: "#settingReportRecipientsConfined" },
-  { key: "chargeup", selector: "#settingReportRecipientsChargeup" },
-  { key: "hazard", selector: "#settingReportRecipientsHazard" },
-  { key: "asbuilt", selector: "#settingReportRecipientsAsbuilt" },
-  { key: "default", selector: "#settingReportRecipientsDefault" },
+  { key: "prestart", label: "Prestart Checklists" },
+  { key: "hazard", label: "Hazard IDs" },
+  { key: "incident", label: "Incident Reports" },
+  { key: "confined", label: "Confined Space Entry" },
+  { key: "chargeup", label: "Charge Ups" },
+  { key: "asbuilt", label: "As-Builts" },
+  { key: "default", label: "All Other Reports" },
 ];
 let calendarRefreshTimer = null;
 
@@ -26,6 +26,8 @@ const state = {
   selectedReport: null,
   selectedJobNumber: "",
   selectedJobInfo: null,
+  selectedReportRecipientKey: "prestart",
+  settingsReportRecipientEmails: {},
   showCompletedJobs: false,
   showArchivedReports: false,
 };
@@ -53,6 +55,10 @@ const setDisabled = (selector, isDisabled) => {
   const element = $(selector);
   if (element) element.disabled = isDisabled;
 };
+
+const getReportRecipientSetting = (key) =>
+  REPORT_RECIPIENT_SETTINGS.find((setting) => setting.key === key) ||
+  REPORT_RECIPIENT_SETTINGS[0];
 
 const setAttributeSafe = (selector, name, value) => {
   const element = $(selector);
@@ -83,6 +89,35 @@ const showNotice = (message, variant = "success") => {
   toastTimer = window.setTimeout(() => {
     toast.className = "admin-toast";
   }, 2600);
+};
+
+const ensureFocusedFieldVisible = (element) => {
+  if (!element || !element.getBoundingClientRect) return;
+
+  const scrollFocusedField = () => {
+    const rect = element.getBoundingClientRect();
+    const viewportHeight = window.visualViewport?.height || window.innerHeight || 0;
+    const viewportOffsetTop = window.visualViewport?.offsetTop || 0;
+    const topSafeArea = 92 + viewportOffsetTop;
+    const bottomSafeArea = 28;
+    const visibleBottom = viewportHeight - bottomSafeArea;
+
+    if (rect.top >= topSafeArea && rect.bottom <= visibleBottom) return;
+
+    const targetTop =
+      window.scrollY +
+      rect.top -
+      Math.max(84, Math.round((viewportHeight - Math.min(rect.height, 220)) / 2));
+
+    window.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: "smooth",
+    });
+  };
+
+  window.setTimeout(scrollFocusedField, 80);
+  window.setTimeout(scrollFocusedField, 320);
+  window.setTimeout(scrollFocusedField, 700);
 };
 
 const escapeHtml = (value) =>
@@ -239,6 +274,48 @@ const linesToList = (value) =>
     .filter(Boolean);
 
 const listToLines = (items = []) => (Array.isArray(items) ? items.join("\n") : "");
+
+const renderReportRecipientOptions = () => {
+  const select = $("#settingReportRecipientType");
+
+  if (!select) return;
+
+  const currentOptions = Array.from(select.options || [])
+    .map((option) => option.value)
+    .join("|");
+  const nextOptions = REPORT_RECIPIENT_SETTINGS.map((setting) => setting.key).join("|");
+
+  if (currentOptions !== nextOptions) {
+    select.innerHTML = REPORT_RECIPIENT_SETTINGS.map(
+      (setting) => `<option value="${setting.key}">${escapeHtml(setting.label)}</option>`
+    ).join("");
+  }
+
+  select.value = state.selectedReportRecipientKey;
+};
+
+const syncSelectedReportRecipientDraft = () => {
+  const textarea = $("#settingReportRecipientEmails");
+  const key = state.selectedReportRecipientKey;
+
+  if (!textarea || !key) return;
+
+  state.settingsReportRecipientEmails = {
+    ...state.settingsReportRecipientEmails,
+    [key]: linesToList(textarea.value),
+  };
+};
+
+const renderReportRecipientEditor = () => {
+  const setting = getReportRecipientSetting(state.selectedReportRecipientKey);
+
+  renderReportRecipientOptions();
+  setText("#settingReportRecipientTitle", setting.label);
+  setValue(
+    "#settingReportRecipientEmails",
+    listToLines(state.settingsReportRecipientEmails[setting.key] || [])
+  );
+};
 
 const sectionsToText = (sections = []) =>
   (Array.isArray(sections) ? sections : [])
@@ -473,6 +550,10 @@ const renderMetrics = () => {
     "#chargeUpCount",
     activeReports.filter((report) => report.reportType === "Charge Up Job Record").length
   );
+  setText(
+    "#confinedCount",
+    activeReports.filter((report) => report.reportType === "Confined Space Entry Permit").length
+  );
   setText("#hazardCount", openHazards.length);
   setText("#jobCount", state.jobs.filter((job) => !isCompletedJob(job)).length);
 };
@@ -483,9 +564,14 @@ const renderSettings = () => {
   const reportRecipientEmails = config.reportRecipientEmails || {};
 
   setValue("#settingRecipientEmails", listToLines(config.recipientEmails || []));
-  REPORT_RECIPIENT_SETTINGS.forEach((setting) => {
-    setValue(setting.selector, listToLines(reportRecipientEmails[setting.key] || []));
-  });
+  state.settingsReportRecipientEmails = REPORT_RECIPIENT_SETTINGS.reduce(
+    (output, setting) => ({
+      ...output,
+      [setting.key]: reportRecipientEmails[setting.key] || [],
+    }),
+    {}
+  );
+  renderReportRecipientEditor();
   setValue("#settingExpiryWarningDays", config.expiryWarningDays || 30);
   setValue("#settingTruckChecklist", sectionsToText(templates.truck || []));
   setValue("#settingDiggerChecklist", sectionsToText(templates.digger || []));
@@ -1013,11 +1099,13 @@ const deleteSelectedJob = async () => {
 };
 
 const saveSettings = async () => {
+  syncSelectedReportRecipientDraft();
+
   const recipientEmails = linesToList($("#settingRecipientEmails").value);
   const reportRecipientEmails = Object.fromEntries(
     REPORT_RECIPIENT_SETTINGS.map((setting) => [
       setting.key,
-      linesToList($(setting.selector).value),
+      state.settingsReportRecipientEmails[setting.key] || [],
     ])
   );
   const config = {
@@ -1667,6 +1755,15 @@ const init = () => {
   $("#saveSettings").addEventListener("click", () =>
     saveSettings().catch((error) => alert(error.message))
   );
+  $("#settingReportRecipientType").addEventListener("change", (event) => {
+    syncSelectedReportRecipientDraft();
+    state.selectedReportRecipientKey = event.target.value;
+    renderReportRecipientEditor();
+    ensureFocusedFieldVisible(event.target);
+  });
+  $("#settingReportRecipientEmails").addEventListener("input", () =>
+    syncSelectedReportRecipientDraft()
+  );
   $("#reportSearch").addEventListener("input", renderReports);
   $("#reportTypeFilter").addEventListener("change", renderReports);
   $("#showArchivedReports").addEventListener("change", (event) => {
@@ -1681,8 +1778,11 @@ const init = () => {
     }
   });
   document.addEventListener("focusin", (event) => {
-    if (event.target.closest("input, textarea, select")) {
+    const field = event.target.closest("input, textarea, select");
+
+    if (field) {
       document.body.classList.add("is-inputting");
+      ensureFocusedFieldVisible(field);
     }
   });
   document.addEventListener("focusout", () => {
@@ -1691,6 +1791,11 @@ const init = () => {
         document.body.classList.remove("is-inputting");
       }
     }, 80);
+  });
+  window.visualViewport?.addEventListener("resize", () => {
+    const field = document.activeElement?.closest?.("input, textarea, select");
+
+    if (field) ensureFocusedFieldVisible(field);
   });
   $("#jobForm").addEventListener("submit", (event) =>
     addJob(event).catch((error) => alert(error.message))

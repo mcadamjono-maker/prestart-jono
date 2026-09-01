@@ -311,6 +311,11 @@ const DEFAULT_FIREBASE_HAZARD_ENDPOINT =
 const FIREBASE_HAZARD_ENDPOINT =
   process.env.EXPO_PUBLIC_FIREBASE_HAZARD_ENDPOINT ||
   DEFAULT_FIREBASE_HAZARD_ENDPOINT;
+const DEFAULT_FIREBASE_CONFINED_ENDPOINT =
+  "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/confinedSpace";
+const FIREBASE_CONFINED_ENDPOINT =
+  process.env.EXPO_PUBLIC_FIREBASE_CONFINED_ENDPOINT ||
+  DEFAULT_FIREBASE_CONFINED_ENDPOINT;
 const DEFAULT_FIREBASE_JOB_INFO_ENDPOINT =
   "https://australia-southeast1-wdl-field-forms.cloudfunctions.net/jobInfo";
 const FIREBASE_JOB_INFO_ENDPOINT =
@@ -770,12 +775,15 @@ const getTodayDisplayDate = () =>
   });
 
 const getCurrentNzTime = () =>
-  new Date().toLocaleTimeString("en-NZ", {
-    timeZone: "Pacific/Auckland",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  new Date()
+    .toLocaleTimeString("en-NZ", {
+      timeZone: "Pacific/Auckland",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .replace(/\s+/g, "")
+    .toLowerCase();
 
 const formatNzProgressDateTitle = (value = new Date()) => {
   const date = value instanceof Date ? value : new Date(String(value || ""));
@@ -888,13 +896,54 @@ const formatFieldValue = (value, fallback = "N/A") => {
     : fallback;
 };
 
+const formatConfinedGasReadingValue = (value, unit) => {
+  const formattedValue = formatFieldValue(value);
+
+  if (formattedValue === "N/A" || /[%a-z]/i.test(formattedValue)) {
+    return formattedValue;
+  }
+
+  return `${formattedValue}${unit}`;
+};
+
 const formatConfinedGasReadings = ({ oxygen, lel, h2s, co } = {}) =>
   [
-    `O2 ${formatFieldValue(oxygen)}`,
-    `LEL ${formatFieldValue(lel)}`,
-    `H2S ${formatFieldValue(h2s)}`,
-    `CO ${formatFieldValue(co)}`,
-  ].join(" | ");
+    `O²   - ${formatConfinedGasReadingValue(oxygen, "%")}  LEL - ${formatConfinedGasReadingValue(lel, "%")}`,
+    `H²S - ${formatConfinedGasReadingValue(h2s, " ppm")} CO  - ${formatConfinedGasReadingValue(co, " ppm")}`,
+  ].join("\n");
+
+const getConfinedLogTitle = (entryLog, allLogs = []) => {
+  if (entryLog?.type === "gas-check") return "Gas Check";
+
+  const entryNumber =
+    allLogs
+      .filter((log) => log.type === "entry")
+      .findIndex((log) => log.id === entryLog?.id) + 1;
+
+  return `Entry/Exit #${Math.max(entryNumber, 1)}`;
+};
+
+const formatConfinedLogDetails = (entryLog) => {
+  if (entryLog?.type === "gas-check") {
+    return [
+      formatFieldValue(entryLog.entryTime),
+      "Gas Monitor Readings",
+      formatConfinedGasReadings(entryLog),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return [
+    formatFieldValue(entryLog?.name),
+    `Entry ${formatFieldValue(entryLog?.entryTime)} | Exit ${formatFieldValue(entryLog?.exitTime)}`,
+    "Gas Monitor Readings",
+    formatConfinedGasReadings(entryLog),
+    entryLog?.notes ? `Notes: ${entryLog.notes}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
 
 const formatReportRow = ([label, value]) => {
   const formattedValue = formatFieldValue(value);
@@ -2436,7 +2485,6 @@ export default function App() {
   const [isConfinedJobDropdownOpen, setIsConfinedJobDropdownOpen] =
     useState(false);
   const [confinedDate, setConfinedDate] = useState(getTodayDisplayDate);
-  const [confinedPermitIssuer, setConfinedPermitIssuer] = useState("");
   const [confinedSupervisor, setConfinedSupervisor] = useState("");
   const [confinedSpaceLocation, setConfinedSpaceLocation] = useState("");
   const [confinedTaskDescription, setConfinedTaskDescription] = useState("");
@@ -2458,10 +2506,21 @@ export default function App() {
   const [confinedEntryLogEntryTime, setConfinedEntryLogEntryTime] =
     useState(getCurrentNzTime);
   const [confinedEntryLogExitTime, setConfinedEntryLogExitTime] = useState("");
-  const [confinedEntryLogNoGasChange, setConfinedEntryLogNoGasChange] =
-    useState(true);
-  const [confinedEntryLogNotes, setConfinedEntryLogNotes] = useState("");
   const [confinedEntryLogs, setConfinedEntryLogs] = useState([]);
+  const [isConfinedGasCheckPanelOpen, setIsConfinedGasCheckPanelOpen] =
+    useState(false);
+  const [confinedGasCheckTime, setConfinedGasCheckTime] =
+    useState(getCurrentNzTime);
+  const [confinedGasCheckOxygen, setConfinedGasCheckOxygen] = useState("");
+  const [confinedGasCheckLel, setConfinedGasCheckLel] = useState("");
+  const [confinedGasCheckH2s, setConfinedGasCheckH2s] = useState("");
+  const [confinedGasCheckCo, setConfinedGasCheckCo] = useState("");
+  const [confinedDraftStatus, setConfinedDraftStatus] = useState("");
+  const [confinedLastSavedAt, setConfinedLastSavedAt] = useState("");
+  const [hasSavedConfinedDraftForWeek, setHasSavedConfinedDraftForWeek] =
+    useState(false);
+  const [isConfinedDraftLoading, setIsConfinedDraftLoading] = useState(false);
+  const [, setIsConfinedDraftSaving] = useState(false);
   const [poRequester, setPoRequester] = useState("");
   const [poSupplier, setPoSupplier] = useState("");
   const [poDetails, setPoDetails] = useState("");
@@ -2593,6 +2652,9 @@ export default function App() {
   const hazardDraftLoadRef = useRef(0);
   const hazardDraftSaveTimerRef = useRef(null);
   const isHydratingHazardDraftRef = useRef(false);
+  const confinedDraftLoadRef = useRef(0);
+  const confinedDraftSaveTimerRef = useRef(null);
+  const isHydratingConfinedDraftRef = useRef(false);
   const hazardSignaturePadRef = useRef(null);
   const asBuiltSignaturePadRef = useRef(null);
   const hazardSignaturePointerRef = useRef(null);
@@ -3593,11 +3655,20 @@ export default function App() {
     setIsPurchaseJobDropdownOpen(false);
   };
 
-  const resetConfinedSpaceForm = () => {
-    setSelectedConfinedJob("");
-    setIsConfinedJobDropdownOpen(false);
+  const resetConfinedGasCheckForm = () => {
+    setConfinedGasCheckTime(getCurrentNzTime());
+    setConfinedGasCheckOxygen("");
+    setConfinedGasCheckLel("");
+    setConfinedGasCheckH2s("");
+    setConfinedGasCheckCo("");
+  };
+
+  const resetConfinedSpaceForm = ({ keepJob = false } = {}) => {
+    if (!keepJob) {
+      setSelectedConfinedJob("");
+      setIsConfinedJobDropdownOpen(false);
+    }
     setConfinedDate(getTodayDisplayDate());
-    setConfinedPermitIssuer("");
     setConfinedSupervisor("");
     setConfinedSpaceLocation("");
     setConfinedTaskDescription("");
@@ -3618,9 +3689,14 @@ export default function App() {
     setConfinedEntryLogName("");
     setConfinedEntryLogEntryTime(getCurrentNzTime());
     setConfinedEntryLogExitTime("");
-    setConfinedEntryLogNoGasChange(true);
-    setConfinedEntryLogNotes("");
     setConfinedEntryLogs([]);
+    setIsConfinedGasCheckPanelOpen(false);
+    resetConfinedGasCheckForm();
+    setConfinedLastSavedAt("");
+    setHasSavedConfinedDraftForWeek(false);
+    setConfinedDraftStatus(
+      keepJob ? "No saved confined space entry for this job yet." : ""
+    );
   };
 
   const getConfinedGasSnapshot = () => ({
@@ -3635,6 +3711,76 @@ export default function App() {
       .map((entryLog) => entryLog.name)
       .filter(Boolean)
       .join(", ");
+
+  const getLatestConfinedGasSnapshot = () => {
+    const latestLog = [...confinedEntryLogs]
+      .reverse()
+      .find((entryLog) => entryLog.type === "entry" || entryLog.type === "gas-check");
+
+    return latestLog
+      ? {
+          oxygen: String(latestLog.oxygen || "").trim(),
+          lel: String(latestLog.lel || "").trim(),
+          h2s: String(latestLog.h2s || "").trim(),
+          co: String(latestLog.co || "").trim(),
+        }
+      : getConfinedGasSnapshot();
+  };
+
+  const hasCompleteConfinedGasSnapshot = (gasSnapshot) =>
+    Boolean(
+      String(gasSnapshot?.oxygen || "").trim() &&
+        String(gasSnapshot?.lel || "").trim() &&
+        String(gasSnapshot?.h2s || "").trim() &&
+        String(gasSnapshot?.co || "").trim()
+    );
+
+  const hydrateConfinedGasCheckForm = () => {
+    const gasSnapshot = getLatestConfinedGasSnapshot();
+
+    setConfinedGasCheckTime(getCurrentNzTime());
+    setConfinedGasCheckOxygen(gasSnapshot.oxygen);
+    setConfinedGasCheckLel(gasSnapshot.lel);
+    setConfinedGasCheckH2s(gasSnapshot.h2s);
+    setConfinedGasCheckCo(gasSnapshot.co);
+  };
+
+  const saveConfinedDraftForLogs = (nextLogs) => {
+    if (
+      !selectedConfinedJob ||
+      isConfinedDraftLoading ||
+      isHydratingConfinedDraftRef.current
+    ) {
+      return;
+    }
+
+    const payload = {
+      ...buildConfinedDraftPayload(),
+      entryLogs: nextLogs,
+    };
+
+    setConfinedDraftStatus("Saving confined space entry...");
+
+    if (!hasConfinedDraftContent(payload)) {
+      clearSubmittedConfinedDraft(payload).then(() => {
+        setConfinedLastSavedAt("");
+        setHasSavedConfinedDraftForWeek(false);
+        setConfinedDraftStatus(
+          "No saved confined space entry for this job yet."
+        );
+      });
+      return;
+    }
+
+    saveConfinedDraft({
+      quiet: true,
+      payloadOverride: payload,
+    }).then((saved) => {
+      if (!saved) {
+        setConfinedDraftStatus("Could not save confined space entry.");
+      }
+    });
+  };
 
   const addConfinedEntryLog = () => {
     const name = confinedEntryLogName.trim();
@@ -3652,28 +3798,29 @@ export default function App() {
 
     const gasSnapshot = getConfinedGasSnapshot();
 
-    setConfinedEntryLogs((currentLogs) => [
-      ...currentLogs,
+    const nextLogs = [
+      ...confinedEntryLogs,
       {
-        id: `${Date.now()}-${currentLogs.length}`,
+        id: `${Date.now()}-${confinedEntryLogs.length}`,
         type: "entry",
         name,
         entryTime,
         exitTime: confinedEntryLogExitTime.trim(),
-        noGasChanges: confinedEntryLogNoGasChange,
-        notes: confinedEntryLogNotes.trim(),
+        noGasChanges: false,
+        notes: "",
         ...gasSnapshot,
       },
-    ]);
+    ];
+
+    setConfinedEntryLogs(nextLogs);
+    saveConfinedDraftForLogs(nextLogs);
     setConfinedEntryLogName("");
     setConfinedEntryLogEntryTime(getCurrentNzTime());
     setConfinedEntryLogExitTime("");
-    setConfinedEntryLogNoGasChange(true);
-    setConfinedEntryLogNotes("");
     Alert.alert("Saved", "Entry / exit log added.");
   };
 
-  const recordConfinedGasCheck = ({ fromReminder = false } = {}) => {
+  const openConfinedGasCheckPanel = () => {
     if (openConfinedEntryLogs.length === 0) {
       Alert.alert(
         "No Open Entry",
@@ -3682,47 +3829,118 @@ export default function App() {
       return;
     }
 
-    const gasSnapshot = getConfinedGasSnapshot();
+    hydrateConfinedGasCheckForm();
+    setIsConfinedGasCheckPanelOpen(true);
+  };
 
-    setConfinedEntryLogs((currentLogs) => [
-      ...currentLogs,
+  const recordConfinedGasCheck = ({
+    noGasChanges = true,
+    readingsOverride = null,
+    checkTime = "",
+  } = {}) => {
+    if (openConfinedEntryLogs.length === 0) {
+      Alert.alert(
+        "No Open Entry",
+        "Add an entry log without an exit time before recording 10 minute gas checks."
+      );
+      return false;
+    }
+
+    const gasSnapshot = readingsOverride || getLatestConfinedGasSnapshot();
+
+    if (!hasCompleteConfinedGasSnapshot(gasSnapshot)) {
+      Alert.alert(
+        "Gas Readings Required",
+        "Enter gas monitor readings before recording the gas check."
+      );
+      return false;
+    }
+
+    const nextLogs = [
+      ...confinedEntryLogs,
       {
-        id: `${Date.now()}-${currentLogs.length}`,
+        id: `${Date.now()}-${confinedEntryLogs.length}`,
         type: "gas-check",
         name: getOpenConfinedEntryNames() || "Open confined space entry",
-        entryTime: getCurrentNzTime(),
+        entryTime: checkTime.trim() || getCurrentNzTime(),
         exitTime: "",
-        noGasChanges: confinedEntryLogNoGasChange,
-        notes: fromReminder
-          ? "10 minute gas check reminder confirmed."
-          : confinedEntryLogNotes.trim(),
+        noGasChanges,
+        notes: "",
         ...gasSnapshot,
       },
-    ]);
-    setConfinedEntryLogNoGasChange(true);
-    setConfinedEntryLogNotes("");
+    ];
+
+    setConfinedEntryLogs(nextLogs);
+    saveConfinedDraftForLogs(nextLogs);
     Alert.alert("Saved", "10 minute gas check recorded.");
+    return true;
+  };
+
+  const recordConfinedNoChangeGasCheck = () => {
+    const saved = recordConfinedGasCheck({
+      noGasChanges: true,
+      readingsOverride: getLatestConfinedGasSnapshot(),
+      checkTime: confinedGasCheckTime,
+    });
+
+    if (saved) {
+      setIsConfinedGasCheckPanelOpen(false);
+      resetConfinedGasCheckForm();
+    }
+  };
+
+  const recordConfinedNewReadingGasCheck = () => {
+    const gasSnapshot = {
+      oxygen: confinedGasCheckOxygen.trim(),
+      lel: confinedGasCheckLel.trim(),
+      h2s: confinedGasCheckH2s.trim(),
+      co: confinedGasCheckCo.trim(),
+    };
+
+    if (!hasCompleteConfinedGasSnapshot(gasSnapshot)) {
+      Alert.alert("Validation", "Enter all gas readings for this check.");
+      return;
+    }
+
+    const saved = recordConfinedGasCheck({
+      noGasChanges: false,
+      readingsOverride: gasSnapshot,
+      checkTime: confinedGasCheckTime,
+    });
+
+    if (saved) {
+      setConfinedOxygen(gasSnapshot.oxygen);
+      setConfinedLel(gasSnapshot.lel);
+      setConfinedH2s(gasSnapshot.h2s);
+      setConfinedCo(gasSnapshot.co);
+      setIsConfinedGasCheckPanelOpen(false);
+      resetConfinedGasCheckForm();
+    }
   };
 
   const closeConfinedEntryLog = (logId) => {
-    setConfinedEntryLogs((currentLogs) =>
-      currentLogs.map((entryLog) =>
-        entryLog.id === logId
-          ? {
-              ...entryLog,
-              exitTime: entryLog.exitTime || getCurrentNzTime(),
-            }
-          : entryLog
-      )
+    const nextLogs = confinedEntryLogs.map((entryLog) =>
+      entryLog.id === logId
+        ? {
+            ...entryLog,
+            exitTime: entryLog.exitTime || getCurrentNzTime(),
+          }
+        : entryLog
     );
+
+    setConfinedEntryLogs(nextLogs);
+    saveConfinedDraftForLogs(nextLogs);
     Alert.alert("Saved", "Exit time recorded.");
   };
 
   const removeConfinedEntryLog = (logId) => {
     const removeLog = () => {
-      setConfinedEntryLogs((currentLogs) =>
-        currentLogs.filter((entryLog) => entryLog.id !== logId)
+      const nextLogs = confinedEntryLogs.filter(
+        (entryLog) => entryLog.id !== logId
       );
+
+      setConfinedEntryLogs(nextLogs);
+      saveConfinedDraftForLogs(nextLogs);
       Alert.alert("Deleted", "Log row removed.");
     };
 
@@ -3785,7 +4003,7 @@ export default function App() {
 
     confinedGasReminderTimerRef.current = setInterval(() => {
       const reminderMessage =
-        "Confirm gas readings are still safe. If anything has changed, update the readings first, untick no changes, then record the gas check.";
+        "Record the 10 minute gas check. Choose no changes since the last check, or enter new gas readings.";
 
       if (
         IS_WEB &&
@@ -3794,10 +4012,12 @@ export default function App() {
       ) {
         if (
           window.confirm(
-            `10 Minute Gas Check\n\n${reminderMessage}\n\nPress OK to log no changes, or Cancel to update the readings yourself.`
+            `10 Minute Gas Check\n\n${reminderMessage}\n\nPress OK for no changes, or Cancel to enter new readings.`
           )
         ) {
-          recordConfinedGasCheck({ fromReminder: true });
+          recordConfinedNoChangeGasCheck();
+        } else {
+          openConfinedGasCheckPanel();
         }
 
         return;
@@ -3809,11 +4029,11 @@ export default function App() {
         [
           {
             text: "No Changes",
-            onPress: () => recordConfinedGasCheck({ fromReminder: true }),
+            onPress: recordConfinedNoChangeGasCheck,
           },
           {
-            text: "I'll Update Readings",
-            style: "cancel",
+            text: "Enter Readings",
+            onPress: openConfinedGasCheckPanel,
           },
         ]
       );
@@ -3827,12 +4047,7 @@ export default function App() {
     };
   }, [
     activePage,
-    confinedCo,
-    confinedEntryLogNoGasChange,
-    confinedEntryLogNotes,
-    confinedH2s,
-    confinedLel,
-    confinedOxygen,
+    confinedEntryLogs,
     isSubmitting,
     openConfinedEntryLogs.length,
   ]);
@@ -4572,6 +4787,346 @@ export default function App() {
     hazardSignOns,
     hasSavedHazardDraftForWeek,
     isHazardDraftLoading,
+  ]);
+
+  const buildConfinedDraftPayload = () => ({
+    jobNumber: selectedConfinedJob,
+    jobName: selectedConfinedJobOption?.name || selectedConfinedJob,
+    weekStart: getCurrentWeekStartIso(),
+    date: confinedDate.trim(),
+    spaceLocation: confinedSpaceLocation.trim(),
+    taskDescription: confinedTaskDescription.trim(),
+    safetyWatch: confinedSupervisor.trim(),
+    entrants: confinedEntrants.trim(),
+    standbyPerson: confinedStandbyPerson.trim(),
+    gasTester: confinedGasTester.trim(),
+    gasMonitor: confinedGasMonitor.trim(),
+    gasReadings: {
+      oxygen: confinedOxygen.trim(),
+      lel: confinedLel.trim(),
+      h2s: confinedH2s.trim(),
+      co: confinedCo.trim(),
+    },
+    entryLogs: confinedEntryLogs,
+    selectedControls: confinedChecks,
+    ventilation: confinedVentilation.trim(),
+    rescuePlan: confinedRescuePlan.trim(),
+    communication: confinedCommunication.trim(),
+    ppe: confinedPpe.trim(),
+    notes: confinedNotes.trim(),
+  });
+
+  const hasConfinedDraftContent = (payload) =>
+    Boolean(
+      payload.spaceLocation ||
+        payload.taskDescription ||
+        payload.safetyWatch ||
+        payload.entrants ||
+        payload.standbyPerson ||
+        payload.gasTester ||
+        payload.gasMonitor ||
+        payload.ventilation ||
+        payload.rescuePlan ||
+        payload.communication ||
+        payload.ppe ||
+        payload.notes ||
+        payload.entryLogs.length > 0 ||
+        Object.values(payload.selectedControls).some(Boolean) ||
+        Object.values(payload.gasReadings).some(Boolean)
+    );
+
+  const hydrateConfinedDraft = (draft) => {
+    const formData = draft?.formData || {};
+    const fields = draft?.fields || {};
+    const gasReadings =
+      formData.gasReadings || draft?.gasReadings || {
+        oxygen: fields.oxygen_percent,
+        lel: fields.lel_percent,
+        h2s: fields.h2s_ppm,
+        co: fields.co_ppm,
+      };
+    const entryLogs = Array.isArray(formData.entryLogs)
+      ? formData.entryLogs
+      : Array.isArray(draft?.entryLogs)
+        ? draft.entryLogs
+        : [];
+
+    isHydratingConfinedDraftRef.current = true;
+    setConfinedDate(formData.date || draft?.date || getTodayDisplayDate());
+    setConfinedSpaceLocation(
+      formData.spaceLocation || draft?.spaceLocation || fields.space_location || ""
+    );
+    setConfinedTaskDescription(
+      formData.taskDescription ||
+        draft?.taskDescription ||
+        fields.task_description ||
+        ""
+    );
+    setConfinedSupervisor(
+      formData.safetyWatch ||
+        draft?.safetyWatch ||
+        formData.supervisor ||
+        fields.safety_watch ||
+        ""
+    );
+    setConfinedEntrants(formData.entrants || draft?.entrants || fields.entrants || "");
+    setConfinedStandbyPerson(
+      formData.standbyPerson ||
+        draft?.standbyPerson ||
+        fields.standby_person ||
+        ""
+    );
+    setConfinedGasTester(
+      formData.gasTester || draft?.gasTester || fields.gas_tester || ""
+    );
+    setConfinedGasMonitor(
+      formData.gasMonitor || draft?.gasMonitor || fields.gas_monitor || ""
+    );
+    setConfinedOxygen(String(gasReadings?.oxygen || ""));
+    setConfinedLel(String(gasReadings?.lel || ""));
+    setConfinedH2s(String(gasReadings?.h2s || ""));
+    setConfinedCo(String(gasReadings?.co || ""));
+    setConfinedVentilation(
+      formData.ventilation || draft?.ventilation || fields.ventilation || ""
+    );
+    setConfinedRescuePlan(
+      formData.rescuePlan || draft?.rescuePlan || fields.rescue_plan || ""
+    );
+    setConfinedCommunication(
+      formData.communication || draft?.communication || fields.communication || ""
+    );
+    setConfinedPpe(formData.ppe || draft?.ppe || fields.ppe_rpe || "");
+    setConfinedNotes(formData.notes || draft?.notes || fields.notes || "");
+    setConfinedChecks(
+      formData.selectedControls || draft?.selectedControls || draft?.controls || {}
+    );
+    setConfinedEntryLogs(
+      entryLogs.map((entryLog, index) => ({
+        id: entryLog.id || `${Date.now()}-${index}`,
+        type: entryLog.type === "gas-check" ? "gas-check" : "entry",
+        name: String(entryLog.name || ""),
+        entryTime: String(entryLog.entryTime || ""),
+        exitTime: String(entryLog.exitTime || ""),
+        noGasChanges: Boolean(entryLog.noGasChanges),
+        notes: String(entryLog.notes || ""),
+        oxygen: String(entryLog.oxygen || ""),
+        lel: String(entryLog.lel || ""),
+        h2s: String(entryLog.h2s || ""),
+        co: String(entryLog.co || ""),
+      }))
+    );
+    setConfinedEntryLogName("");
+    setConfinedEntryLogEntryTime(getCurrentNzTime());
+    setConfinedEntryLogExitTime("");
+    setIsConfinedGasCheckPanelOpen(false);
+    resetConfinedGasCheckForm();
+    setConfinedLastSavedAt(draft?.submittedAtIso || draft?.updatedAtIso || "");
+    setHasSavedConfinedDraftForWeek(true);
+    setConfinedDraftStatus("Loaded this week's saved confined space entry.");
+    setTimeout(() => {
+      isHydratingConfinedDraftRef.current = false;
+    }, 0);
+  };
+
+  const saveConfinedDraft = async ({
+    quiet = false,
+    payloadOverride = null,
+  } = {}) => {
+    if (!selectedConfinedJob || !FIREBASE_CONFINED_ENDPOINT) return false;
+
+    const payload = payloadOverride || buildConfinedDraftPayload();
+
+    if (!payload.jobName) return false;
+
+    if (!hasConfinedDraftContent(payload)) {
+      if (!quiet) {
+        Alert.alert(
+          "Nothing To Save Yet",
+          "Add confined space details or an entry log before saving this job for the week."
+        );
+      }
+
+      return false;
+    }
+
+    try {
+      if (!quiet) setIsConfinedDraftSaving(true);
+
+      const response = await fetch(FIREBASE_CONFINED_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "save",
+          ...payload,
+        }),
+      });
+      const responseBody = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          responseBody.error || "Unable to save confined space entry."
+        );
+      }
+
+      const savedAt = getSubmittedAt();
+      setConfinedLastSavedAt(savedAt);
+      setHasSavedConfinedDraftForWeek(true);
+      setConfinedDraftStatus(`Saved for ${payload.jobName}.`);
+
+      if (!quiet) {
+        Alert.alert(
+          "Confined Space Saved",
+          "This job's confined space entry is saved for the week."
+        );
+      }
+
+      return true;
+    } catch (error) {
+      console.warn("Unable to save confined space draft", error);
+
+      if (!quiet) {
+        Alert.alert(
+          "Save Failed",
+          error.message || "Unable to save confined space entry."
+        );
+      }
+
+      return false;
+    } finally {
+      if (!quiet) setIsConfinedDraftSaving(false);
+    }
+  };
+
+  const clearSubmittedConfinedDraft = async (payload) => {
+    if (!FIREBASE_CONFINED_ENDPOINT || !payload?.jobNumber) return;
+
+    await fetch(FIREBASE_CONFINED_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "submitted",
+        jobNumber: payload.jobNumber,
+        weekStart: payload.weekStart,
+      }),
+    }).catch((error) => {
+      console.warn("Unable to clear submitted confined space draft", error);
+    });
+  };
+
+  useEffect(() => {
+    if (!selectedConfinedJob || !FIREBASE_CONFINED_ENDPOINT) {
+      setConfinedDraftStatus("");
+      setConfinedLastSavedAt("");
+      setHasSavedConfinedDraftForWeek(false);
+      return;
+    }
+
+    let isMounted = true;
+    const loadId = confinedDraftLoadRef.current + 1;
+    const weekStart = getCurrentWeekStartIso();
+
+    confinedDraftLoadRef.current = loadId;
+    setIsConfinedDraftLoading(true);
+    setHasSavedConfinedDraftForWeek(false);
+    setConfinedDraftStatus("Checking for this week's saved confined space entry...");
+
+    const loadConfinedDraft = async () => {
+      try {
+        const response = await fetch(
+          `${FIREBASE_CONFINED_ENDPOINT}?jobNumber=${encodeURIComponent(
+            selectedConfinedJob
+          )}&weekStart=${encodeURIComponent(weekStart)}`
+        );
+        const payload = await response.json().catch(() => ({}));
+
+        if (!isMounted || confinedDraftLoadRef.current !== loadId) return;
+
+        if (!response.ok) {
+          throw new Error(
+            payload.error || "Unable to load confined space entry."
+          );
+        }
+
+        if (payload.draft) {
+          hydrateConfinedDraft(payload.draft);
+        } else {
+          isHydratingConfinedDraftRef.current = true;
+          resetConfinedSpaceForm({ keepJob: true });
+          setTimeout(() => {
+            isHydratingConfinedDraftRef.current = false;
+          }, 0);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.warn("Unable to load confined space draft", error);
+          setConfinedDraftStatus("Could not load the saved confined space entry.");
+        }
+      } finally {
+        if (isMounted && confinedDraftLoadRef.current === loadId) {
+          setIsConfinedDraftLoading(false);
+        }
+      }
+    };
+
+    loadConfinedDraft();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedConfinedJob]);
+
+  useEffect(() => {
+    if (
+      activePage !== "confined" ||
+      !selectedConfinedJob ||
+      !hasSavedConfinedDraftForWeek ||
+      isConfinedDraftLoading ||
+      isHydratingConfinedDraftRef.current
+    ) {
+      return;
+    }
+
+    if (confinedDraftSaveTimerRef.current) {
+      clearTimeout(confinedDraftSaveTimerRef.current);
+    }
+
+    confinedDraftSaveTimerRef.current = setTimeout(() => {
+      saveConfinedDraft({ quiet: true });
+    }, 1800);
+
+    return () => {
+      if (confinedDraftSaveTimerRef.current) {
+        clearTimeout(confinedDraftSaveTimerRef.current);
+      }
+    };
+  }, [
+    activePage,
+    selectedConfinedJob,
+    confinedDate,
+    confinedSpaceLocation,
+    confinedTaskDescription,
+    confinedSupervisor,
+    confinedEntrants,
+    confinedStandbyPerson,
+    confinedGasTester,
+    confinedGasMonitor,
+    confinedOxygen,
+    confinedLel,
+    confinedH2s,
+    confinedCo,
+    confinedVentilation,
+    confinedRescuePlan,
+    confinedCommunication,
+    confinedPpe,
+    confinedChecks,
+    confinedNotes,
+    confinedEntryLogs,
+    hasSavedConfinedDraftForWeek,
+    isConfinedDraftLoading,
   ]);
 
   const loadSelectedJobInfo = async ({ showAlert = false } = {}) => {
@@ -6169,13 +6724,13 @@ export default function App() {
       return;
     }
 
-    if (!confinedPermitIssuer.trim()) {
-      Alert.alert("Validation", "Please enter who authorised the entry.");
+    if (!confinedEntrants.trim()) {
+      Alert.alert("Validation", "Please enter the entrants.");
       return;
     }
 
-    if (!confinedEntrants.trim()) {
-      Alert.alert("Validation", "Please enter the entrants.");
+    if (!confinedSupervisor.trim()) {
+      Alert.alert("Validation", "Please enter the safety watch.");
       return;
     }
 
@@ -6193,7 +6748,7 @@ export default function App() {
     ) {
       Alert.alert(
         "Validation",
-        "Please enter the gas tester and atmospheric readings before entry."
+        "Please enter the person testing gas levels and atmospheric readings before entry."
       );
       return;
     }
@@ -6232,28 +6787,18 @@ export default function App() {
         (item) => !confinedChecks[item]
       );
       const jobName = selectedConfinedJobOption?.name || selectedConfinedJob;
+      const draftPayload = buildConfinedDraftPayload();
       const gasReadingRows = [
-        ["Oxygen %", confinedOxygen.trim() || "N/A"],
+        ["O²", confinedOxygen.trim() || "N/A"],
         ["LEL %", confinedLel.trim() || "N/A"],
-        ["H2S ppm", confinedH2s.trim() || "N/A"],
+        ["H²S ppm", confinedH2s.trim() || "N/A"],
         ["CO ppm", confinedCo.trim() || "N/A"],
-        ["Gas Tester", confinedGasTester.trim() || "N/A"],
-        ["Gas Monitor / Calibration", confinedGasMonitor.trim() || "N/A"],
+        ["Person Testing Gas Levels", confinedGasTester.trim() || "N/A"],
+        ["Gas Monitor Serial# / Calibration Date", confinedGasMonitor.trim() || "N/A"],
       ];
-      const entryLogRows = confinedEntryLogs.map((entryLog, index) => [
-        `${entryLog.type === "gas-check" ? "Gas Check" : "Entry / Exit"} ${
-          index + 1
-        }`,
-        [
-          `Name: ${formatFieldValue(entryLog.name)}`,
-          `Entry / Check Time: ${formatFieldValue(entryLog.entryTime)}`,
-          `Exit Time: ${formatFieldValue(entryLog.exitTime)}`,
-          `No Changes In Gas Readings: ${
-            entryLog.noGasChanges ? "Yes" : "No"
-          }`,
-          `Readings: ${formatConfinedGasReadings(entryLog)}`,
-          `Notes: ${formatFieldValue(entryLog.notes)}`,
-        ].join("\n"),
+      const entryLogRows = confinedEntryLogs.map((entryLog) => [
+        getConfinedLogTitle(entryLog, confinedEntryLogs),
+        formatConfinedLogDetails(entryLog),
       ]);
       const subject = `Confined space entry permit - ${jobName}`;
       const message = buildFiledEmail({
@@ -6268,8 +6813,7 @@ export default function App() {
               ["Date", confinedDate.trim()],
               ["Space / Location", confinedSpaceLocation.trim()],
               ["Task", confinedTaskDescription.trim()],
-              ["Authorised By", confinedPermitIssuer.trim()],
-              ["Supervisor", confinedSupervisor.trim() || "N/A"],
+              ["Safety Watch", confinedSupervisor.trim() || "N/A"],
             ],
           },
           {
@@ -6315,8 +6859,7 @@ export default function App() {
         date: confinedDate.trim() || "N/A",
         space_location: confinedSpaceLocation.trim(),
         task_description: confinedTaskDescription.trim(),
-        authorised_by: confinedPermitIssuer.trim(),
-        supervisor: confinedSupervisor.trim() || "N/A",
+        safety_watch: confinedSupervisor.trim() || "N/A",
         entrants: confinedEntrants.trim(),
         standby_person: confinedStandbyPerson.trim(),
         oxygen_percent: confinedOxygen.trim() || "N/A",
@@ -6334,7 +6877,7 @@ export default function App() {
         communication: confinedCommunication.trim() || "N/A",
         ppe_rpe: confinedPpe.trim() || "N/A",
         notes: confinedNotes.trim() || "N/A",
-        operator: confinedPermitIssuer.trim(),
+        operator: confinedSupervisor.trim(),
         machine: selectedConfinedJob,
         answers: selectedChecks.join("\n"),
       };
@@ -6345,28 +6888,8 @@ export default function App() {
         message,
         fields,
         formData: {
-          jobNumber: selectedConfinedJob,
-          jobName: selectedConfinedJobOption?.name || "",
-          date: confinedDate.trim(),
-          spaceLocation: confinedSpaceLocation.trim(),
-          taskDescription: confinedTaskDescription.trim(),
-          authorisedBy: confinedPermitIssuer.trim(),
-          supervisor: confinedSupervisor.trim(),
-          entrants: confinedEntrants.trim(),
-          standbyPerson: confinedStandbyPerson.trim(),
-          gasReadings: {
-            oxygen: confinedOxygen.trim(),
-            lel: confinedLel.trim(),
-            h2s: confinedH2s.trim(),
-            co: confinedCo.trim(),
-          },
-          entryLogs: confinedEntryLogs,
+          ...draftPayload,
           selectedControls: selectedChecks,
-          ventilation: confinedVentilation.trim(),
-          rescuePlan: confinedRescuePlan.trim(),
-          communication: confinedCommunication.trim(),
-          ppe: confinedPpe.trim(),
-          notes: confinedNotes.trim(),
         },
       });
 
@@ -6399,6 +6922,7 @@ export default function App() {
           "Confined space entry permit emailed successfully."
         )
       );
+      await clearSubmittedConfinedDraft(draftPayload);
       resetConfinedSpaceForm();
     } catch (error) {
       Alert.alert("Email Failed", getEmailErrorMessage(error));
@@ -7807,6 +8331,24 @@ export default function App() {
                   isSubmitting={isSubmitting}
                 />
 
+                {!!selectedConfinedJob && (
+                  <View style={styles.hazardDraftPanel}>
+                    <Text style={styles.hazardDraftText}>
+                      {isConfinedDraftLoading
+                        ? "Loading this job's weekly confined space entry..."
+                        : confinedDraftStatus ||
+                          (hasSavedConfinedDraftForWeek
+                            ? "This confined space entry is saved for the week and will keep updating."
+                            : "Add an entry or gas check log to attach this confined space entry to this job.")}
+                    </Text>
+                    {!!confinedLastSavedAt && (
+                      <Text style={styles.hazardDraftMeta}>
+                        Last saved: {confinedLastSavedAt}
+                      </Text>
+                    )}
+                  </View>
+                )}
+
                 <StableLabeledInput
                   label="Date"
                   value={confinedDate}
@@ -7837,15 +8379,7 @@ export default function App() {
                 <View style={styles.inputGap} />
 
                 <StableLabeledInput
-                  label="Authorised By"
-                  value={confinedPermitIssuer}
-                  onChangeText={setConfinedPermitIssuer}
-                  commitOnChange
-                  editable={!isSubmitting}
-                />
-
-                <StableLabeledInput
-                  label="Supervisor"
+                  label="Safety Watch"
                   value={confinedSupervisor}
                   onChangeText={setConfinedSupervisor}
                   commitOnChange
@@ -7879,6 +8413,7 @@ export default function App() {
 
                 <StableLabeledInput
                   label="Gas Tester"
+                  placeholder="Enter name of person testing Gas levels"
                   value={confinedGasTester}
                   onChangeText={setConfinedGasTester}
                   commitOnChange
@@ -7887,6 +8422,7 @@ export default function App() {
 
                 <StableLabeledInput
                   label="Gas Monitor / Calibration"
+                  placeholder="Enter Gas Monitor serial#/calibration date"
                   value={confinedGasMonitor}
                   onChangeText={setConfinedGasMonitor}
                   commitOnChange
@@ -7963,46 +8499,6 @@ export default function App() {
                   editable={!isSubmitting}
                 />
 
-                <Pressable
-                  style={styles.checkboxRow}
-                  onPress={() =>
-                    setConfinedEntryLogNoGasChange(
-                      (currentValue) => !currentValue
-                    )
-                  }
-                  disabled={isSubmitting}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: confinedEntryLogNoGasChange }}
-                >
-                  <View
-                    style={[
-                      styles.checkboxBox,
-                      confinedEntryLogNoGasChange && styles.checkboxBoxChecked,
-                    ]}
-                  >
-                    {confinedEntryLogNoGasChange && (
-                      <View style={styles.checkboxTickIcon}>
-                        <View style={styles.checkboxTickShort} />
-                        <View style={styles.checkboxTickLong} />
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.checkboxText}>
-                    No changes in gas readings
-                  </Text>
-                </Pressable>
-
-                <StableLabeledInput
-                  label="Log Notes"
-                  placeholder="Reason for change, retest notes, or rescue standby notes..."
-                  multiline
-                  style={styles.notes}
-                  value={confinedEntryLogNotes}
-                  onChangeText={setConfinedEntryLogNotes}
-                  commitOnChange
-                  editable={!isSubmitting}
-                />
-
                 <View style={styles.signOnActions}>
                   <Pressable
                     style={[
@@ -8024,7 +8520,7 @@ export default function App() {
                       (isSubmitting || openConfinedEntryLogs.length === 0) &&
                         styles.disabledButton,
                     ]}
-                    onPress={() => recordConfinedGasCheck()}
+                    onPress={openConfinedGasCheckPanel}
                     disabled={isSubmitting || openConfinedEntryLogs.length === 0}
                     accessibilityRole="button"
                   >
@@ -8034,43 +8530,151 @@ export default function App() {
                   </Pressable>
                 </View>
 
+                {isConfinedGasCheckPanelOpen && (
+                  <View style={styles.confinedGasCheckPanel}>
+                    <Text style={styles.confinedLogTitle}>Gas Check</Text>
+                    <Text style={styles.settingsHelpText}>
+                      Choose no changes, or enter a new set of readings for this
+                      10 minute check.
+                    </Text>
+
+                    <StableLabeledInput
+                      label="Check Time"
+                      value={confinedGasCheckTime}
+                      onChangeText={setConfinedGasCheckTime}
+                      commitOnChange
+                      editable={!isSubmitting}
+                    />
+
+                    <Pressable
+                      style={[
+                        styles.secondaryButton,
+                        isSubmitting && styles.disabledButton,
+                      ]}
+                      onPress={() => recordConfinedNoChangeGasCheck()}
+                      disabled={isSubmitting}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        NO CHANGES SINCE LAST CHECK
+                      </Text>
+                    </Pressable>
+
+                    <View style={styles.inputGap} />
+
+                    <StableLabeledInput
+                      label="Oxygen %"
+                      value={confinedGasCheckOxygen}
+                      onChangeText={setConfinedGasCheckOxygen}
+                      commitOnChange
+                      keyboardType="decimal-pad"
+                      editable={!isSubmitting}
+                    />
+
+                    <StableLabeledInput
+                      label="LEL %"
+                      value={confinedGasCheckLel}
+                      onChangeText={setConfinedGasCheckLel}
+                      commitOnChange
+                      keyboardType="decimal-pad"
+                      editable={!isSubmitting}
+                    />
+
+                    <StableLabeledInput
+                      label="H2S ppm"
+                      value={confinedGasCheckH2s}
+                      onChangeText={setConfinedGasCheckH2s}
+                      commitOnChange
+                      keyboardType="decimal-pad"
+                      editable={!isSubmitting}
+                    />
+
+                    <StableLabeledInput
+                      label="CO ppm"
+                      value={confinedGasCheckCo}
+                      onChangeText={setConfinedGasCheckCo}
+                      commitOnChange
+                      keyboardType="decimal-pad"
+                      editable={!isSubmitting}
+                    />
+
+                    <View style={styles.signOnActions}>
+                      <Pressable
+                        style={[
+                          styles.hazardSaveButton,
+                          isSubmitting && styles.disabledButton,
+                        ]}
+                        onPress={() => recordConfinedNewReadingGasCheck()}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.hazardSaveButtonText}>
+                          SAVE NEW READINGS
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.secondaryButton,
+                          isSubmitting && styles.disabledButton,
+                        ]}
+                        onPress={() => setIsConfinedGasCheckPanelOpen(false)}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.secondaryButtonText}>CANCEL</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+
                 <View style={styles.confinedLogList}>
                   {confinedEntryLogs.length === 0 ? (
                     <Text style={styles.emptyJobText}>
                       No entry or gas check rows recorded yet.
                     </Text>
                   ) : (
-                    confinedEntryLogs.map((entryLog, index) => {
+                    confinedEntryLogs.map((entryLog) => {
                       const isEntry = entryLog.type === "entry";
                       const isOpenEntry =
                         isEntry &&
                         entryLog.entryTime &&
                         !entryLog.exitTime;
+                      const gasReadingLines =
+                        formatConfinedGasReadings(entryLog).split("\n");
 
                       return (
                         <View key={entryLog.id} style={styles.confinedLogItem}>
                           <View style={styles.confinedLogHeader}>
                             <Text style={styles.confinedLogTitle}>
-                              {isEntry ? "Entry / Exit" : "Gas Check"} #{index + 1}
+                              {getConfinedLogTitle(entryLog, confinedEntryLogs)}
                             </Text>
                             {isOpenEntry && (
                               <Text style={styles.confinedLogBadge}>OPEN</Text>
                             )}
                           </View>
-                          <Text style={styles.confinedLogText}>
-                            {entryLog.name || "N/A"}
-                          </Text>
+                          {isEntry && (
+                            <Text style={styles.confinedLogText}>
+                              {entryLog.name || "N/A"}
+                            </Text>
+                          )}
                           <Text style={styles.confinedLogMeta}>
-                            Entry / Check: {entryLog.entryTime || "N/A"} | Exit:{" "}
-                            {entryLog.exitTime || "N/A"}
+                            {isEntry
+                              ? `Entry ${entryLog.entryTime || "N/A"} | Exit ${
+                                  entryLog.exitTime || "N/A"
+                                }`
+                              : entryLog.entryTime || "N/A"}
                           </Text>
-                          <Text style={styles.confinedLogMeta}>
-                            No gas changes:{" "}
-                            {entryLog.noGasChanges ? "Yes" : "No"}
+                          <Text style={styles.confinedGasReadingHeading}>
+                            Gas Monitor Readings
                           </Text>
-                          <Text style={styles.confinedLogMeta}>
-                            {formatConfinedGasReadings(entryLog)}
-                          </Text>
+                          {gasReadingLines.map((line) => (
+                            <Text
+                              key={`${entryLog.id}-${line}`}
+                              style={styles.confinedLogMeta}
+                            >
+                              {line}
+                            </Text>
+                          ))}
                           {!!entryLog.notes && (
                             <Text style={styles.confinedLogText}>
                               {entryLog.notes}
@@ -8217,9 +8821,7 @@ export default function App() {
                 {isSubmitting ? (
                   <ActivityIndicator color="#000" />
                 ) : (
-                  <Text style={styles.submitText}>
-                    SUBMIT ENTRY PERMIT
-                  </Text>
+                  <Text style={styles.submitText}>SUBMIT</Text>
                 )}
               </Pressable>
             </>
@@ -10678,6 +11280,15 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
 
+  confinedGasCheckPanel: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(215,255,47,0.22)",
+    padding: 14,
+    marginTop: 14,
+  },
+
   confinedLogItem: {
     backgroundColor: "rgba(0,0,0,0.48)",
     borderRadius: 14,
@@ -10716,6 +11327,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     fontWeight: "700",
+  },
+
+  confinedGasReadingHeading: {
+    color: "#fff",
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "900",
+    marginTop: 8,
   },
 
   confinedLogMeta: {

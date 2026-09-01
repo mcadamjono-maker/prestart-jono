@@ -692,6 +692,11 @@ const migrateJobReferences = async (db, oldJobNumber, newJobNumber, jobName) => 
     .where("jobNumber", "==", oldJobNumber)
     .limit(450)
     .get();
+  const confinedSnapshot = await db
+    .collection("confinedSpaces")
+    .where("jobNumber", "==", oldJobNumber)
+    .limit(450)
+    .get();
 
   const reportBatch = db.batch();
 
@@ -735,6 +740,36 @@ const migrateJobReferences = async (db, oldJobNumber, newJobNumber, jobName) => 
 
   if (!hazardSnapshot.empty) {
     await hazardBatch.commit();
+  }
+
+  const confinedBatch = db.batch();
+
+  confinedSnapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const nextId = buildConfinedDraftId(
+      newJobNumber,
+      normaliseWeekStart(data.weekStart)
+    );
+    const nextRef = db.collection("confinedSpaces").doc(nextId);
+
+    confinedBatch.set(
+      nextRef,
+      {
+        ...data,
+        jobNumber: newJobNumber,
+        ...(jobName ? { jobName } : {}),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    if (nextRef.id !== doc.id) {
+      confinedBatch.delete(doc.ref);
+    }
+  });
+
+  if (!confinedSnapshot.empty) {
+    await confinedBatch.commit();
   }
 };
 
@@ -1308,6 +1343,9 @@ const normaliseWeekStart = (weekStart) => {
 const buildHazardDraftId = (jobNumber, weekStart) =>
   `${normaliseWeekStart(weekStart)}_${normaliseJobNumber(jobNumber)}`;
 
+const buildConfinedDraftId = (jobNumber, weekStart) =>
+  `${normaliseWeekStart(weekStart)}_${normaliseJobNumber(jobNumber)}`;
+
 const normaliseStringMap = (value = {}) => {
   const source = toPlainObject(value);
   const output = {};
@@ -1535,6 +1573,161 @@ const publicHazardDraft = (doc) => {
     signOns,
     submittedAtIso: data.updatedAtIso || "",
     weekStart: data.weekStart || "",
+  };
+};
+
+const normaliseConfinedGasReadings = (gasReadings = {}) => {
+  const source = toPlainObject(gasReadings);
+
+  return {
+    oxygen: normaliseString(source.oxygen, 30),
+    lel: normaliseString(source.lel, 30),
+    h2s: normaliseString(source.h2s, 30),
+    co: normaliseString(source.co, 30),
+  };
+};
+
+const normaliseConfinedEntryLogs = (entryLogs = []) => {
+  if (!Array.isArray(entryLogs)) return [];
+
+  return entryLogs
+    .slice(0, 250)
+    .map((entryLog, index) => {
+      const type = entryLog?.type === "gas-check" ? "gas-check" : "entry";
+      const name = normaliseString(entryLog?.name, 180);
+      const entryTime = normaliseString(entryLog?.entryTime, 80);
+      const exitTime = normaliseString(entryLog?.exitTime, 80);
+      const gasReadings = normaliseConfinedGasReadings(entryLog);
+
+      if (!entryTime && type === "gas-check") return null;
+      if (!name && !entryTime && type === "entry") return null;
+
+      return {
+        id: normaliseString(entryLog?.id, 80) || `${Date.now()}-${index}`,
+        type,
+        name,
+        entryTime,
+        exitTime,
+        noGasChanges: Boolean(entryLog?.noGasChanges),
+        notes: normaliseString(entryLog?.notes, 500),
+        ...gasReadings,
+      };
+    })
+    .filter(Boolean);
+};
+
+const buildConfinedDraft = (body = {}) => {
+  const now = new Date();
+  const jobNumber = normaliseJobNumber(body.jobNumber);
+  const jobName = normaliseJobName(body.jobName);
+  const weekStart = normaliseWeekStart(body.weekStart);
+  const gasReadings = normaliseConfinedGasReadings(body.gasReadings);
+  const entryLogs = normaliseConfinedEntryLogs(body.entryLogs);
+  const selectedControls = normaliseStringMap(
+    body.selectedControls || body.controls || {}
+  );
+
+  if (!jobNumber) {
+    throw new Error("Job number is required.");
+  }
+
+  if (!jobName) {
+    throw new Error("Job name is required.");
+  }
+
+  return {
+    reportType: "Confined Space Entry Permit",
+    status: "Active",
+    jobNumber,
+    jobName,
+    weekStart,
+    date: normaliseString(body.date, 80),
+    spaceLocation: normaliseString(body.spaceLocation, 180),
+    taskDescription: normaliseString(body.taskDescription, 800),
+    safetyWatch: normaliseString(
+      body.safetyWatch || body.supervisor,
+      160
+    ),
+    entrants: normaliseString(body.entrants, 1000),
+    standbyPerson: normaliseString(body.standbyPerson, 180),
+    gasTester: normaliseString(body.gasTester, 180),
+    gasMonitor: normaliseString(body.gasMonitor, 180),
+    gasReadings,
+    entryLogs,
+    selectedControls,
+    ventilation: normaliseString(body.ventilation, 1200),
+    rescuePlan: normaliseString(body.rescuePlan, 1200),
+    communication: normaliseString(body.communication, 800),
+    ppe: normaliseString(body.ppe, 1000),
+    notes: normaliseString(body.notes, 2000),
+    searchText: toSearchText(
+      "Confined Space Entry Permit",
+      jobNumber,
+      jobName,
+      body.date,
+      body.spaceLocation,
+      body.taskDescription,
+      body.safetyWatch,
+      body.entrants,
+      body.standbyPerson,
+      body.gasTester
+    ),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAtIso: now.toISOString(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+};
+
+const publicConfinedDraft = (doc) => {
+  const data = doc.data() || {};
+
+  return {
+    id: doc.id,
+    reportType: "Confined Space Entry Permit",
+    subject: `Confined Space Entry - ${data.jobName || data.jobNumber || doc.id}`,
+    message: "Active weekly confined space entry.",
+    fields: {
+      job_number: data.jobNumber || "",
+      job_name: data.jobName || "",
+      week_start: data.weekStart || "",
+      date: data.date || "",
+      space_location: data.spaceLocation || "",
+      task_description: data.taskDescription || "",
+      safety_watch: data.safetyWatch || "",
+      entrants: data.entrants || "",
+      standby_person: data.standbyPerson || "",
+      gas_tester: data.gasTester || "",
+      gas_monitor: data.gasMonitor || "",
+      selected_controls: selectedMapLabels(data.selectedControls || {}),
+      entry_exit_log: formatReportValue(data.entryLogs || []),
+    },
+    formData: {
+      jobNumber: data.jobNumber || "",
+      jobName: data.jobName || "",
+      weekStart: data.weekStart || "",
+      date: data.date || "",
+      spaceLocation: data.spaceLocation || "",
+      taskDescription: data.taskDescription || "",
+      safetyWatch: data.safetyWatch || "",
+      entrants: data.entrants || "",
+      standbyPerson: data.standbyPerson || "",
+      gasTester: data.gasTester || "",
+      gasMonitor: data.gasMonitor || "",
+      gasReadings: data.gasReadings || {},
+      entryLogs: data.entryLogs || [],
+      selectedControls: data.selectedControls || {},
+      ventilation: data.ventilation || "",
+      rescuePlan: data.rescuePlan || "",
+      communication: data.communication || "",
+      ppe: data.ppe || "",
+      notes: data.notes || "",
+    },
+    status: data.status || "Active",
+    jobNumber: data.jobNumber || "",
+    jobName: data.jobName || "",
+    requestedBy: data.safetyWatch || "",
+    weekStart: data.weekStart || "",
+    submittedAtIso: data.updatedAtIso || "",
   };
 };
 
@@ -2718,6 +2911,92 @@ exports.hazardId = onRequest(
   }
 );
 
+exports.confinedSpace = onRequest(
+  {
+    region: "australia-southeast1",
+    cors: true,
+    memory: "256MiB",
+    timeoutSeconds: 30,
+  },
+  async (request, response) => {
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    try {
+      const db = getFirestore();
+      const confinedCollection = db.collection("confinedSpaces");
+
+      if (request.method === "GET") {
+        const jobNumber = normaliseJobNumber(request.query?.jobNumber);
+        const weekStart = normaliseWeekStart(request.query?.weekStart);
+
+        if (jobNumber) {
+          const doc = await confinedCollection
+            .doc(buildConfinedDraftId(jobNumber, weekStart))
+            .get();
+
+          response.status(200).json({
+            ok: true,
+            draft: doc.exists ? publicConfinedDraft(doc) : null,
+          });
+          return;
+        }
+
+        const snapshot = await confinedCollection
+          .where("weekStart", "==", weekStart)
+          .limit(200)
+          .get();
+
+        response.status(200).json({
+          ok: true,
+          drafts: snapshot.docs.map(publicConfinedDraft),
+        });
+        return;
+      }
+
+      if (request.method === "POST") {
+        const action = String(request.body?.action || "save");
+        const jobNumber = normaliseJobNumber(request.body?.jobNumber);
+        const weekStart = normaliseWeekStart(request.body?.weekStart);
+
+        if (!jobNumber) {
+          response.status(400).json({ error: "Job number is required." });
+          return;
+        }
+
+        const docRef = confinedCollection.doc(
+          buildConfinedDraftId(jobNumber, weekStart)
+        );
+
+        if (action === "delete" || action === "submitted") {
+          await docRef.delete();
+          response.status(200).json({ ok: true });
+          return;
+        }
+
+        const draft = buildConfinedDraft(request.body);
+
+        await docRef.set(draft, { merge: true });
+
+        response.status(200).json({
+          ok: true,
+          draft: publicConfinedDraft(await docRef.get()),
+        });
+        return;
+      }
+
+      response.status(405).json({ error: "GET or POST required." });
+    } catch (error) {
+      console.error("confinedSpace failed", { message: error.message });
+      response.status(500).json({
+        error: error.message || "Unable to update the confined space entry.",
+      });
+    }
+  }
+);
+
 exports.dashboard = onRequest(
   {
     region: "australia-southeast1",
@@ -3177,8 +3456,29 @@ exports.dashboard = onRequest(
           }
 
           const jobRef = db.collection("jobs").doc(jobNumber);
+          const [hazardDraftsSnapshot, confinedDraftsSnapshot] = await Promise.all([
+            db.collection("hazardIds").where("jobNumber", "==", jobNumber).limit(450).get(),
+            db
+              .collection("confinedSpaces")
+              .where("jobNumber", "==", jobNumber)
+              .limit(450)
+              .get(),
+          ]);
 
           await deleteJobFiles(jobRef);
+          const deleteDraftBatch = db.batch();
+
+          hazardDraftsSnapshot.docs.forEach((draftDoc) => {
+            deleteDraftBatch.delete(draftDoc.ref);
+          });
+          confinedDraftsSnapshot.docs.forEach((draftDoc) => {
+            deleteDraftBatch.delete(draftDoc.ref);
+          });
+
+          if (!hazardDraftsSnapshot.empty || !confinedDraftsSnapshot.empty) {
+            await deleteDraftBatch.commit();
+          }
+
           await jobRef.delete();
 
           response.status(200).json({
